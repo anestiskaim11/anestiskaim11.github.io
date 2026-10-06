@@ -1,4 +1,4 @@
-import { Mail, ExternalLink, GraduationCap, Briefcase, FileText, FolderKanban, Code, Linkedin } from "lucide-react";
+import { Mail, ExternalLink, GraduationCap, Briefcase, FileText, FolderKanban, Code, Linkedin, Github } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -6,6 +6,30 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { ResultsTable } from "@/components/ResultsTable";
 import portraitImage from "@/assets/portrait.jpg";
 import fclVitPreview from "@/assets/fcl-vit-preview.png";
+
+const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path}`;
+
+const InstitutionLogo = ({
+  href,
+  logoPath,
+  label,
+  imageClassName = "h-7 w-auto max-w-[160px] object-contain",
+}: {
+  href: string;
+  logoPath: string;
+  label: string;
+  imageClassName?: string;
+}) => (
+  <a
+    href={href}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="shrink-0 rounded-md bg-background/80 px-3 py-2 ring-1 ring-border/50 hover:ring-primary/40 transition-colors"
+    aria-label={label}
+  >
+    <img src={assetUrl(logoPath)} alt="" className={imageClassName} />
+  </a>
+);
 
 const Index = () => {
   const publications = [
@@ -18,7 +42,7 @@ const Index = () => {
     },
     {
       title: "Collaborative Knowledge Distillation via a Learning-by-Education Node Community",
-      venue: "Under final review at IEEE Transactions on Artificial Intelligence",
+      venue: "IEEE Transactions on Artificial Intelligence, 2025",
       link: "https://arxiv.org/abs/2410.00074",
     },
     {
@@ -69,13 +93,18 @@ const Index = () => {
     "AI engineering & MLOps": [
       "RAG pipelines",
       "LangChain",
+      "Vector databases",
       "Multi-agent systems",
+      "Prompt engineering",
       "Claude & OpenAI APIs",
       "FastAPI",
       "Docker",
       "Kubernetes",
+      "Modal",
       "AWS",
-      "REST APIs",
+      "Azure",
+      "GCP",
+      "REST & WebSocket APIs",
       "Git",
       "Linux",
     ],
@@ -91,37 +120,40 @@ const Index = () => {
       "Dart",
       "HTML/CSS",
     ],
-    "Databases": ["PostgreSQL", "MySQL", "Supabase"],
-    "Languages": ["English (fluent)", "French (intermediate)", "Greek (native)"],
+    Databases: ["PostgreSQL", "MySQL", "Supabase", "Firebase"],
+    Languages: ["English (fluent)", "French (intermediate)", "Greek (native)"],
   };
 
   const projects = [
     {
-      name: "Big Fish — AI-powered portfolio intelligence",
-      role: "Full-stack ML & deployment",
+      name: "AI-powered trading intelligence platform",
+      role: "Python, PyTorch, TypeScript, Supabase, Next.js",
       description:
-        "Ensemble of RL agents trading 17 US equities with tuned reward shaping and exploration; multi-agent LLM layer over RAG on news and filings for macro context and risk governance; Python/FastAPI backend, web frontend, and live paper trading.",
+        "End-to-end AI trading over a 16-asset equity and ETF universe: cross-sectional allocator trained by gradient descent on a differentiable backtest (validation Sharpe 1.73); PPO agent with per-asset LSTM and transformer over assets; live paper trading on Supabase with 15-minute market ingest, Claude Sonnet overlay, and a Next.js dashboard reconciling Alpaca orders daily.",
+      github: "https://github.com/anestiskaim11/big-fish",
       link: "https://big-fish-nine.vercel.app/",
     },
     {
-      name: "Retinal AI — medical imaging & recommendations",
-      role: "Computer vision & explainable AI",
+      name: "Diabetic Retinopathy Grading AI",
+      role: "PyTorch, DINOv2, FastAPI, Docker",
       description:
-        "Multiple CV models for disease prediction from retina images, an agent guided by those predictors, explainable heatmaps, online integration, and generative models mapping retina images to advanced modalities for further analysis.",
+        "Fine-tuned DINOv2-Base ViT with attention pooling for 6-class DR grading on OIA-DDR (84.99% test accuracy; 97.39% specificity on refer decisions). Focal loss and two-stage transfer learning; Dockerized FastAPI /predict with grades, referral flags, probabilities, and attention heatmaps.",
+      github: "https://github.com/anestiskaim11/vythos-ai",
     },
     {
-      name: "AI booking marketplace (Venus Bookings)",
-      role: "Mobile product & AI features",
+      name: "Venus — consumer booking app",
+      role: "Flutter, Dart, Firebase, Cloud Functions",
       description:
-        "Client app for bookings and professional app with AI-assisted business tools; live for 12 months across 20 venues with 1,000+ bookings; shipped to App Store and Google Play.",
+        "Cross-platform Flutter app for beauty and grooming venues on the App Store and Google Play: 12 months in production, 20 partner venues, 1,000+ bookings. Firebase backend with real-time slot availability, map-based discovery, and full reservation flow.",
+      github: "https://github.com/anestiskaim11/Venus",
     },
   ];
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen">
       {/* Hero Section */}
-      <section className="relative min-h-screen flex items-center justify-center overflow-hidden bg-gradient-hero">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(120,119,198,0.15),rgba(255,255,255,0))]" />
+      <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(120,119,198,0.12),transparent_55%)] pointer-events-none" />
         <div className="container mx-auto px-6 py-20 relative z-10">
           <div className="max-w-4xl mx-auto text-center space-y-8 animate-fade-in">
             <Avatar className="w-32 h-32 mx-auto mb-6 ring-4 ring-primary/20">
@@ -163,11 +195,11 @@ const Index = () => {
                   <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
                   Google Scholar
                 </a>
-                <span className="text-muted-foreground"> (15 citations, 7 publications)</span>
+                <span className="text-muted-foreground"> (17 citations, 7 publications)</span>
               </p>
             </div>
             <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-              AI researcher and engineer focused on computer vision, NLP, reinforcement learning, and production ML systems
+              AI researcher and engineer focused on generative AI, computer vision, NLP, reinforcement learning, and production ML systems
             </p>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-w-3xl mx-auto pt-4">
               <Button size="lg" variant="outline" className="border-primary/30 hover:bg-primary/10" asChild>
@@ -223,7 +255,15 @@ const Index = () => {
               <div className="flex items-start gap-4 mb-4">
                 <div className="w-2 h-2 rounded-full bg-primary mt-2 animate-glow" />
                 <div className="flex-1">
-                  <h3 className="text-2xl font-bold mb-2">Northeastern University, Boston</h3>
+                  <div className="flex flex-wrap items-start justify-between gap-4 mb-2">
+                    <h3 className="text-2xl font-bold">Northeastern University, Boston</h3>
+                    <InstitutionLogo
+                      href="https://www.northeastern.edu/"
+                      logoPath="logos/northeastern-wordmark.png"
+                      label="Northeastern University website"
+                      imageClassName="h-6 w-auto max-w-[180px] object-contain"
+                    />
+                  </div>
                   <p className="text-accent font-semibold mb-2">MS in Artificial Intelligence — Khoury College of Computer Sciences</p>
                   <p className="text-muted-foreground text-sm">September 2025 – Present · Expected graduation 2027</p>
                   <p className="text-foreground/90 mt-3">GPA: 3.92/4.0</p>
@@ -238,9 +278,17 @@ const Index = () => {
               <div className="flex items-start gap-4 mb-4">
                 <div className="w-2 h-2 rounded-full bg-secondary mt-2 animate-glow" />
                 <div className="flex-1">
-                  <h3 className="text-2xl font-bold mb-2">Aristotle University (A.U.Th.), Thessaloniki, Greece</h3>
+                  <div className="flex flex-wrap items-start justify-between gap-4 mb-2">
+                    <h3 className="text-2xl font-bold">Aristotle University (A.U.Th.), Thessaloniki, Greece</h3>
+                    <InstitutionLogo
+                      href="https://www.auth.gr/en"
+                      logoPath="logos/auth_logo.jpeg"
+                      label="Aristotle University of Thessaloniki website"
+                      imageClassName="h-11 w-11 object-contain rounded-full"
+                    />
+                  </div>
                   <p className="text-accent font-semibold mb-2">Integrated Master&apos;s in Electrical and Computer Engineering</p>
-                  <p className="text-muted-foreground text-sm">Graduated 2023</p>
+                  <p className="text-muted-foreground text-sm">September 2018 – July 2023</p>
                   <div className="mt-3 space-y-1">
                     <p className="text-foreground/90">GPA: 8.93/10.0</p>
                     <p className="text-foreground/80 text-sm">
@@ -255,7 +303,7 @@ const Index = () => {
       </section>
 
       {/* Experience Section */}
-      <section id="experience" className="py-24 px-6 bg-card/30">
+      <section id="experience" className="py-24 px-6 bg-card/40 backdrop-blur-[1px]">
         <div className="container mx-auto max-w-6xl">
           <h2 className="text-4xl font-bold mb-12 text-center">
             <span className="bg-gradient-primary bg-clip-text text-transparent">Experience</span>
@@ -263,19 +311,61 @@ const Index = () => {
           <div className="space-y-8">
             <Card className="p-8 bg-gradient-card border-border/50 hover:border-primary/50 transition-all duration-300">
               <div className="flex items-start gap-4">
+                <div className="w-1 h-full bg-accent rounded-full min-h-[100px]" />
+                <div className="flex-1">
+                  <div className="flex flex-wrap items-start justify-between gap-4 mb-2">
+                    <h3 className="text-2xl font-bold">Generative AI Research Intern (Co-op)</h3>
+                    <InstitutionLogo
+                      href="https://www.cotiviti.com/"
+                      logoPath="logos/cotiviti-white.svg"
+                      label="Cotiviti website"
+                    />
+                  </div>
+                  <p className="text-accent font-semibold mb-2">Cotiviti, Inc. · South Jordan, UT</p>
+                  <p className="text-muted-foreground text-sm mb-4">August 2026 – December 2026</p>
+                  <ul className="space-y-2 text-foreground/90">
+                    <li className="flex items-start gap-2">
+                      <span className="text-accent mt-1">▸</span>
+                      <span>
+                        Design and build multi-agent LLM workflows for ICD code audits, orchestrating tool use, retrieval, and structured output over code policies
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-accent mt-1">▸</span>
+                      <span>
+                        Develop an evaluation harness for agent outputs, lifting accuracy from 80% to 82% over the existing pipeline
+                      </span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="p-8 bg-gradient-card border-border/50 hover:border-primary/50 transition-all duration-300">
+              <div className="flex items-start gap-4">
                 <div className="w-1 h-full bg-secondary rounded-full min-h-[100px]" />
                 <div className="flex-1">
-                  <h3 className="text-2xl font-bold mb-2">Teaching Assistant — Algorithms (CS5800)</h3>
+                  <div className="flex flex-wrap items-start justify-between gap-4 mb-2">
+                    <h3 className="text-2xl font-bold">Teaching Assistant — Algorithms (CS5800, Graduate)</h3>
+                    <InstitutionLogo
+                      href="https://www.khoury.northeastern.edu/"
+                      logoPath="logos/northeastern-wordmark.png"
+                      label="Khoury College of Computer Sciences website"
+                      imageClassName="h-6 w-auto max-w-[180px] object-contain"
+                    />
+                  </div>
                   <p className="text-accent font-semibold mb-2">Khoury College of Computer Sciences, Northeastern University</p>
                   <p className="text-muted-foreground text-sm mb-4">January 2026 – April 2026</p>
                   <ul className="space-y-2 text-foreground/90">
                     <li className="flex items-start gap-2">
                       <span className="text-accent mt-1">▸</span>
-                      <span>Supported MSc students during office hours and one-on-one tutoring</span>
+                      <span>
+                        Supported 350+ graduate students through weekly office hours and one-on-one tutoring on decomposing complex algorithmic problems
+                      </span>
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-accent mt-1">▸</span>
-                      <span>Graded homework and exams with actionable feedback</span>
+                      <span>Graded 100+ homework and exams per week with detailed written feedback</span>
                     </li>
                   </ul>
                 </div>
@@ -286,8 +376,18 @@ const Index = () => {
               <div className="flex items-start gap-4">
                 <div className="w-1 h-full bg-primary rounded-full min-h-[100px]" />
                 <div className="flex-1">
-                  <h3 className="text-2xl font-bold mb-2">Research Assistant</h3>
-                  <p className="text-accent font-semibold mb-2">Artificial Intelligence and Information Analysis (AIIA) Lab, Thessaloniki</p>
+                  <div className="flex flex-wrap items-start justify-between gap-4 mb-2">
+                    <h3 className="text-2xl font-bold">Research Assistant</h3>
+                    <InstitutionLogo
+                      href="https://www.auth.gr/en"
+                      logoPath="logos/auth_logo.jpeg"
+                      label="Aristotle University of Thessaloniki website"
+                      imageClassName="h-11 w-11 object-contain rounded-full"
+                    />
+                  </div>
+                  <p className="text-accent font-semibold mb-2">
+                    Artificial Intelligence and Information Analysis (AIIA) Lab, Aristotle University · Thessaloniki, Greece
+                  </p>
                   <p className="text-muted-foreground text-sm mb-4">May 2022 – August 2024</p>
                   <ul className="space-y-2 text-foreground/90">
                     <li className="flex items-start gap-2">
@@ -373,7 +473,7 @@ const Index = () => {
       </section>
 
       {/* Projects Section */}
-      <section id="projects" className="py-24 px-6 bg-card/30">
+      <section id="projects" className="py-24 px-6 bg-card/40 backdrop-blur-[1px]">
         <div className="container mx-auto max-w-6xl">
           <h2 className="text-4xl font-bold mb-12 text-center">
             <span className="bg-gradient-primary bg-clip-text text-transparent">Projects</span>
@@ -390,12 +490,33 @@ const Index = () => {
                     <p className="text-accent font-semibold">{project.role}</p>
                     <p className="text-foreground/90">{project.description}</p>
                   </div>
-                  {project.link && (
-                    <Button variant="ghost" size="icon" className="hover:bg-primary/10 hover:text-primary" asChild>
-                      <a href={project.link} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="h-5 w-5" />
-                      </a>
-                    </Button>
+                  {(project.github || project.link) && (
+                    <div className="flex flex-col gap-1 shrink-0">
+                      {project.github && (
+                        <Button variant="ghost" size="icon" className="hover:bg-primary/10 hover:text-primary" asChild>
+                          <a
+                            href={project.github}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`View ${project.name} on GitHub`}
+                          >
+                            <Github className="h-5 w-5" />
+                          </a>
+                        </Button>
+                      )}
+                      {project.link && (
+                        <Button variant="ghost" size="icon" className="hover:bg-primary/10 hover:text-primary" asChild>
+                          <a
+                            href={project.link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`Open ${project.name} live demo`}
+                          >
+                            <ExternalLink className="h-5 w-5" />
+                          </a>
+                        </Button>
+                      )}
+                    </div>
                   )}
                 </div>
               </Card>
@@ -428,7 +549,7 @@ const Index = () => {
       </section>
 
       {/* Contact Section */}
-      <section id="contact" className="py-24 px-6 bg-gradient-hero">
+      <section id="contact" className="py-24 px-6 bg-background/30 backdrop-blur-[1px]">
         <div className="container mx-auto max-w-4xl text-center">
           <h2 className="text-4xl font-bold mb-6">
             <span className="bg-gradient-primary bg-clip-text text-transparent">Let's Connect</span>

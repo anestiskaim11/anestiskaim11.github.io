@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 
-// Project Pages: /Personal-Website/ — user site (repo anestiskaim11.github.io): set VITE_DEPLOY_BASE=/
+// User GitHub Pages (anestiskaim11.github.io) serves at /. For a project site, set VITE_DEPLOY_BASE=/repo-name/
 const deployBase = process.env.VITE_DEPLOY_BASE ?? "/";
 
 // https://vitejs.dev/config/

@@ -31,8 +31,6 @@ jobs:
         run: npm ci
       
       - name: Build
-        env:
-          VITE_DEPLOY_BASE: /Personal-Website/
         run: npm run build && cp dist/index.html dist/404.html
       
       - name: Setup Pages

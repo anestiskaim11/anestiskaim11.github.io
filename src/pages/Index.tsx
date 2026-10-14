@@ -1,4 +1,6 @@
-import { Mail, ExternalLink, GraduationCap, Briefcase, FileText, FolderKanban, Code, Linkedin, Github } from "lucide-react";
+import { Mail, ExternalLink, GraduationCap, Briefcase, FileText, FolderKanban, Code, Linkedin, Github, Gamepad2 } from "lucide-react";
+import { ArcadeSection } from "@/components/arcade/ArcadeSection";
+import { ParticleHeroLazy } from "@/components/hero-particles/ParticleHeroLazy";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -152,8 +154,9 @@ const Index = () => {
   return (
     <div className="min-h-screen">
       {/* Hero Section */}
-      <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
+      <section className="relative min-h-screen flex items-center justify-center overflow-hidden bg-background">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(120,119,198,0.12),transparent_55%)] pointer-events-none" />
+        <ParticleHeroLazy />
         <div className="container mx-auto px-6 py-20 relative z-10">
           <div className="max-w-4xl mx-auto text-center space-y-8 animate-fade-in">
             <Avatar className="w-32 h-32 mx-auto mb-6 ring-4 ring-primary/20">
@@ -232,6 +235,12 @@ const Index = () => {
                   Skills
                 </a>
               </Button>
+              <Button size="lg" variant="outline" className="border-primary/30 hover:bg-primary/10" asChild>
+                <a href="#arcade" aria-label="Jump to AI Arcade section">
+                  <Gamepad2 className="mr-2 h-5 w-5" />
+                  Arcade
+                </a>
+              </Button>
               <Button size="lg" className="bg-primary hover:bg-primary/90 shadow-glow" asChild>
                 <a href="#contact" aria-label="Jump to Contact section">
                   <Mail className="mr-2 h-5 w-5" />
@@ -250,52 +259,47 @@ const Index = () => {
           <h2 className="text-4xl font-bold mb-12 text-center">
             <span className="bg-gradient-primary bg-clip-text text-transparent">Education & Background</span>
           </h2>
-          <div className="grid md:grid-cols-2 gap-8">
-            <Card className="p-8 bg-gradient-card border-border/50 hover:border-primary/50 transition-all duration-300 hover:shadow-glow">
-              <div className="flex items-start gap-4 mb-4">
-                <div className="w-2 h-2 rounded-full bg-primary mt-2 animate-glow" />
-                <div className="flex-1">
-                  <div className="flex flex-wrap items-start justify-between gap-4 mb-2">
-                    <h3 className="text-2xl font-bold">Northeastern University, Boston</h3>
-                    <InstitutionLogo
-                      href="https://www.northeastern.edu/"
-                      logoPath="logos/northeastern-wordmark.png"
-                      label="Northeastern University website"
-                      imageClassName="h-6 w-auto max-w-[180px] object-contain"
-                    />
-                  </div>
-                  <p className="text-accent font-semibold mb-2">MS in Artificial Intelligence — Khoury College of Computer Sciences</p>
-                  <p className="text-muted-foreground text-sm">September 2025 – Present · Expected graduation 2027</p>
-                  <p className="text-foreground/90 mt-3">GPA: 3.92/4.0</p>
-                  <p className="text-foreground/80 text-sm mt-2">
-                    Coursework includes Foundation of Artificial Intelligence, Machine Learning and Pattern Recognition, Algorithms, and Programming and Data Processing for AI.
-                  </p>
-                </div>
+          {/* Each card spans 4 shared rows (header, degree, dates, details) so both line up at any title length. */}
+          <div className="grid gap-8 md:grid-cols-2 md:gap-x-8 md:gap-y-0">
+            <Card className="grid p-8 bg-gradient-card border-border/50 hover:border-primary/50 transition-all duration-300 hover:shadow-glow md:row-span-4 md:grid-rows-subgrid md:gap-y-0">
+              <div className="relative flex flex-wrap lg:flex-nowrap items-start justify-between gap-4 pl-6 mb-2">
+                <div className="absolute left-0 top-2 w-2 h-2 rounded-full bg-primary animate-glow" />
+                <h3 className="text-2xl font-bold">Northeastern University, Boston</h3>
+                <InstitutionLogo
+                  href="https://www.northeastern.edu/"
+                  logoPath="logos/northeastern-wordmark.png"
+                  label="Northeastern University website"
+                  imageClassName="h-6 w-auto max-w-[180px] object-contain"
+                />
+              </div>
+              <p className="pl-6 text-accent font-semibold mb-2">MS in Artificial Intelligence — Khoury College of Computer Sciences</p>
+              <p className="pl-6 text-muted-foreground text-sm">September 2025 – Present · Expected graduation 2027</p>
+              <div className="pl-6">
+                <p className="text-foreground/90 mt-3">GPA: 3.92/4.0</p>
+                <p className="text-foreground/80 text-sm mt-2">
+                  Coursework includes Foundation of Artificial Intelligence, Machine Learning and Pattern Recognition, Algorithms, and Programming and Data Processing for AI.
+                </p>
               </div>
             </Card>
 
-            <Card className="p-8 bg-gradient-card border-border/50 hover:border-primary/50 transition-all duration-300 hover:shadow-glow">
-              <div className="flex items-start gap-4 mb-4">
-                <div className="w-2 h-2 rounded-full bg-secondary mt-2 animate-glow" />
-                <div className="flex-1">
-                  <div className="flex flex-wrap items-start justify-between gap-4 mb-2">
-                    <h3 className="text-2xl font-bold">Aristotle University (A.U.Th.), Thessaloniki, Greece</h3>
-                    <InstitutionLogo
-                      href="https://www.auth.gr/en"
-                      logoPath="logos/auth_logo.jpeg"
-                      label="Aristotle University of Thessaloniki website"
-                      imageClassName="h-11 w-11 object-contain rounded-full"
-                    />
-                  </div>
-                  <p className="text-accent font-semibold mb-2">Integrated Master&apos;s in Electrical and Computer Engineering</p>
-                  <p className="text-muted-foreground text-sm">September 2018 – July 2023</p>
-                  <div className="mt-3 space-y-1">
-                    <p className="text-foreground/90">GPA: 8.93/10.0</p>
-                    <p className="text-foreground/80 text-sm">
-                      Coursework includes Pattern Recognition, Data Structures, Databases, and Deep Learning.
-                    </p>
-                  </div>
-                </div>
+            <Card className="grid p-8 bg-gradient-card border-border/50 hover:border-primary/50 transition-all duration-300 hover:shadow-glow md:row-span-4 md:grid-rows-subgrid md:gap-y-0">
+              <div className="relative flex flex-wrap lg:flex-nowrap items-start justify-between gap-4 pl-6 mb-2">
+                <div className="absolute left-0 top-2 w-2 h-2 rounded-full bg-secondary animate-glow" />
+                <h3 className="text-2xl font-bold">Aristotle University (A.U.Th.), Thessaloniki, Greece</h3>
+                <InstitutionLogo
+                  href="https://www.auth.gr/en"
+                  logoPath="logos/auth_logo.jpeg"
+                  label="Aristotle University of Thessaloniki website"
+                  imageClassName="h-11 w-11 object-contain rounded-full"
+                />
+              </div>
+              <p className="pl-6 text-accent font-semibold mb-2">Integrated Master&apos;s in Electrical and Computer Engineering</p>
+              <p className="pl-6 text-muted-foreground text-sm">September 2018 – July 2023</p>
+              <div className="pl-6">
+                <p className="text-foreground/90 mt-3">GPA: 8.93/10.0</p>
+                <p className="text-foreground/80 text-sm mt-2">
+                  Coursework includes Pattern Recognition, Data Structures, Databases, and Deep Learning.
+                </p>
               </div>
             </Card>
           </div>
@@ -328,12 +332,6 @@ const Index = () => {
                       <span className="text-accent mt-1">▸</span>
                       <span>
                         Design and build multi-agent LLM workflows for ICD code audits, orchestrating tool use, retrieval, and structured output over code policies
-                      </span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="text-accent mt-1">▸</span>
-                      <span>
-                        Develop an evaluation harness for agent outputs, lifting accuracy from 80% to 82% over the existing pipeline
                       </span>
                     </li>
                   </ul>
@@ -548,16 +546,17 @@ const Index = () => {
         </div>
       </section>
 
+      <ArcadeSection />
+
       {/* Contact Section */}
       <section id="contact" className="py-24 px-6 bg-background/30 backdrop-blur-[1px]">
         <div className="container mx-auto max-w-4xl text-center">
           <h2 className="text-4xl font-bold mb-6">
             <span className="bg-gradient-primary bg-clip-text text-transparent">Let's Connect</span>
           </h2>
-          <p className="text-muted-foreground mb-4 text-lg">
+          <p className="text-muted-foreground mb-8 text-lg">
             Interested in collaboration or want to discuss AI research? Feel free to reach out.
           </p>
-          <p className="text-muted-foreground text-sm mb-8">Available for opportunities: August – December 2026</p>
           <div className="flex gap-4 justify-center flex-wrap">
             <Button size="lg" className="bg-primary hover:bg-primary/90 shadow-glow" asChild>
               <a href="mailto:kaimakamidis.a@northeastern.edu">

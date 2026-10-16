@@ -1,26 +1,28 @@
-import { Bot, Brain, CheckCircle2, Play, ThumbsUp, Trophy } from "lucide-react";
+import { Brain, CheckCircle2, Gamepad2, MessageSquareHeart, Play, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { LEVELS } from "../sim/levels";
-import { ROLE_INFO } from "../sim/robots";
+import { ROLE_INFO, type Role } from "../sim/robots";
 import type { LevelProgress, PersonalBest } from "../storage";
 import { ROLE_ICONS } from "./roleIcons";
 
 interface StartScreenProps {
   levelId: string;
   onLevel: (id: string) => void;
+  humanRole: Role;
+  onHumanRole: (role: Role) => void;
   onStart: (continueTraining: boolean) => void;
   progress: Record<string, LevelProgress>;
   best: PersonalBest | null;
 }
 
 const HOW_TO = [
-  { icon: Bot, text: "Every robot has one ability the others lack. The energy core only reaches the reactor if they work together." },
-  { icon: Brain, text: "They learn by reinforcement learning: each robot learns which skill to use and when, from a shared team reward." },
-  { icon: ThumbsUp, text: "You're the coach. Reward or punish robots live, or vote on the strategies they try, to speed up their learning." },
+  { icon: Gamepad2, text: "Pick a robot and drive it yourself. Every robot has one ability the others lack, and the energy core only reaches the reactor if you all work together." },
+  { icon: Brain, text: "Your AI teammates start out clumsy: they wander off and try pointless moves. They learn by reinforcement learning which skill to use and when, from a shared team reward." },
+  { icon: MessageSquareHeart, text: "After every episode you rate the team's plan, any teammates, or both. Your feedback is the fastest way to train them out of bad habits, and most of your score comes from your own play and your feedback." },
 ];
 
-export function StartScreen({ levelId, onLevel, onStart, progress, best }: StartScreenProps) {
+export function StartScreen({ levelId, onLevel, humanRole, onHumanRole, onStart, progress, best }: StartScreenProps) {
   const level = LEVELS.find((l) => l.id === levelId) ?? LEVELS[0];
   const saved = progress[level.id];
   const hasBrain = !!saved?.brain && saved.episodes > 0;
@@ -79,10 +81,44 @@ export function StartScreen({ levelId, onLevel, onStart, progress, best }: Start
           })}
         </div>
 
+        {level.channels && (
+          <p className="mt-3 text-xs text-sky-300/90">
+            Linked switches: a numbered pip marks every terminal, door, plate and laser. A switch only works the doors or lasers with the same
+            number.
+          </p>
+        )}
+
+        <div className="mt-8 text-xs uppercase tracking-wider text-slate-400">Your robot</div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {level.robots.map((role) => {
+            const Icon = ROLE_ICONS[role];
+            const info = ROLE_INFO[role];
+            const active = role === humanRole;
+            return (
+              <button
+                key={role}
+                type="button"
+                onClick={() => onHumanRole(role)}
+                aria-pressed={active}
+                title={info.ability}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400",
+                  active ? "bg-white/10 text-white" : "border-white/10 text-slate-300 hover:border-white/25",
+                )}
+                style={active ? { borderColor: info.color, boxShadow: `0 0 14px ${info.color}55` } : undefined}
+              >
+                <Icon className="h-3.5 w-3.5" style={{ color: info.color }} />
+                {info.name}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-2 text-xs text-slate-400">{ROLE_INFO[humanRole].ability}</p>
+
         <div className="mt-8 flex flex-wrap items-center gap-3">
           <Button size="lg" onClick={() => onStart(true)} className="shadow-glow" autoFocus>
             <Play className="mr-2 h-5 w-5" />
-            {hasBrain ? "Continue training" : "Start training"}
+            {hasBrain ? "Continue playing" : "Start playing"}
           </Button>
           {hasBrain && (
             <Button size="lg" variant="outline" onClick={() => onStart(false)}>
@@ -96,7 +132,7 @@ export function StartScreen({ levelId, onLevel, onStart, progress, best }: Start
             </span>
           )}
         </div>
-        <p className="mt-3 text-xs text-slate-500">↑ / ↓ reward or punish · Tab select robot · P / Space pause · Esc quit · 1-3 speed</p>
+        <p className="mt-3 text-xs text-slate-500">WASD / arrows move · Space / E use ability · click a tile to walk there · P pause · Esc quit · 1-3 speed</p>
       </div>
     </div>
   );

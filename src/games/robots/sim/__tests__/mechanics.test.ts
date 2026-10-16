@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { parseLevel, TILE } from "../grid";
-import { getLevel, LEVELS } from "../levels";
+import { LEVELS, type LevelDef } from "../levels";
 import { findPath } from "../pathfinding";
 import type { Role } from "../robots";
 import { World } from "../world";
+import { fixture } from "./fixtures";
 
 /** World where only the listed roles act; everyone else is switched off. */
 function isolated(levelId: string, roles: Role[]) {
-  const w = new World(getLevel(levelId), { seed: 1 });
+  const w = new World(fixture(levelId), { seed: 1 });
   for (const r of w.robots) if (!roles.includes(r.role)) r.active = false;
   return w;
 }
@@ -108,7 +109,7 @@ describe("mechanics", () => {
   });
 
   it("only the Jumper can reach the island plate", () => {
-    const w = new World(getLevel("rubble-run"), { seed: 1 });
+    const w = new World(fixture("rubble-run"), { seed: 1 });
     w.rubble[0] = false;
     const plate = w.level.plates[0];
     const from = tileAt(w, 12, 6);
@@ -131,5 +132,57 @@ describe("mechanics", () => {
     expect(w.passable(rubble, "lifter")).toBe(false);
     run(w, "breaker", "Break rubble");
     expect(w.passable(rubble, "lifter")).toBe(true);
+  });
+});
+
+describe("linked switches", () => {
+  const fixture = (map: string[], channels: string[]): LevelDef => ({
+    id: "fixture",
+    name: "Fixture",
+    tier: 1,
+    timeLimit: 200,
+    description: "",
+    robots: ["lifter", "hacker"],
+    map,
+    channels,
+  });
+
+  const doors = fixture(
+    ["#########", "#SST.T..#", "#SS.....#", "###D#D###", "#.......#", "#G.....C#", "#########"],
+    [".........", "...1.2...", ".........", "...1.2...", ".........", ".........", "........."],
+  );
+  const lasers = fixture(
+    ["#########", "#SS.P.P.#", "#SS.....#", "#LLLLLLL#", "#.......#", "#LLLLLLL#", "#G....C.#", "#########"],
+    [".........", "....1.2..", ".........", ".1111111.", ".........", ".2222222.", ".........", "........."],
+  );
+
+  it("a terminal opens only the doors on its channel", () => {
+    const w = new World(doors, { seed: 1 });
+    const [d1, d2] = [tileAt(w, 3, 3), tileAt(w, 5, 3)];
+    run(w, "hacker", "Hack terminal 1");
+    expect(w.passable(d1, "lifter")).toBe(true);
+    expect(w.passable(d2, "lifter")).toBe(false);
+    run(w, "hacker", "Hack terminal 2");
+    expect(w.passable(d2, "lifter")).toBe(true);
+    expect(w.doorsOpen).toBe(true);
+  });
+
+  it("a plate switches off only the lasers on its channel", () => {
+    const w = new World(lasers, { seed: 1 });
+    const hacker = robotOf(w, "hacker");
+    w.command(hacker.id, hacker.options.findIndex((o) => o.label === "Hold plate 1"));
+    for (let t = 0; t < 20 && hacker.phase !== "hold"; t++) w.step();
+    w.step();
+    expect(w.lasersOn).toEqual([false, true]);
+  });
+
+  it("rejects overlays that leave a lock without a key", () => {
+    expect(() => parseLevel({ ...doors, channels: doors.channels!.map((l, y) => (y === 3 ? l.replace("2", "3") : l)) })).toThrow(/no terminal/);
+    expect(() => parseLevel({ ...doors, channels: doors.channels!.map((l) => l.replace("1", ".")) })).toThrow(/channel digit/);
+  });
+
+  it("names linked switches after their channel", () => {
+    const w = new World(doors, { seed: 1 });
+    expect(robotOf(w, "hacker").options.map((o) => o.label)).toContain("Hack terminal 2");
   });
 });

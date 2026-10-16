@@ -14,7 +14,7 @@ export function PauseOverlay({ stats, score, onResume, onQuit }: PauseOverlayPro
     <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/40 backdrop-blur-[2px]">
       <div className="w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-white/10 bg-slate-950/85 p-6 text-center text-slate-200 shadow-2xl">
         <h2 className="text-2xl font-bold tracking-tight">Paused</h2>
-        <p className="mt-1 text-sm text-slate-400">You can still vote on strategy cards while paused.</p>
+        <p className="mt-1 text-sm text-slate-400">You can still coach teammates and vote on strategy cards while paused.</p>
         <dl className="mt-5 grid grid-cols-3 gap-2 text-center">
           {[
             ["Episode", stats?.episode ?? 1],

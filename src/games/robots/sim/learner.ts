@@ -10,6 +10,9 @@ export interface LearnerParams {
 
 export const DEFAULT_PARAMS: LearnerParams = { alpha: 0.25, gammaTick: 0.99, beta: 40, alphaHuman: 0.6 };
 
+/** How strongly feedback skews random exploration (H = ±1 shifts the odds by about e^±3). */
+const EXPLORE_FEEDBACK = 3;
+
 export interface SerializedLearner {
   q: [string, number[]][];
   h: [string, number[]][];
@@ -36,14 +39,20 @@ export class Learner {
     private readonly params: LearnerParams = DEFAULT_PARAMS,
   ) {}
 
-  choose(state: string, available: boolean[], epsilon: number): Choice {
+  /**
+   * Explores with probability `epsilon`, otherwise acts greedily on Q + β·H.
+   * Exploration draws from `explore` (relative odds per option, 0 = never;
+   * defaults to the available ones), which may include pointless moves a
+   * novice wastes time on. It is weighted by H so feedback steers it at once.
+   */
+  choose(state: string, available: boolean[], epsilon: number, explore: number[] = available.map(Number)): Choice {
     const valid: number[] = [];
     for (let o = 0; o < this.optionCount; o++) if (available[o]) valid.push(o);
     if (valid.length === 0) return { option: -1, humanSwayed: false, greedy: false };
-    if (this.rng() < epsilon) return { option: valid[Math.floor(this.rng() * valid.length)], humanSwayed: false, greedy: false };
-
     const q = this.q.get(state);
     const h = this.h.get(state);
+    if (this.rng() < epsilon) return { option: this.explore(explore, h) ?? valid[0], humanSwayed: false, greedy: false };
+
     const pick = (score: (o: number) => number) => {
       let best = -Infinity;
       let ties: number[] = [];
@@ -62,6 +71,23 @@ export class Learner {
     const qBest = Math.max(...valid.map(qOf));
     const humanSwayed = !!h && qOf(option) < qBest - 1e-9;
     return { option, humanSwayed, greedy: true };
+  }
+
+  /** A random option, its odds scaled by e^(k·H): a 👎 makes it far rarer, a 👍 far likelier. */
+  private explore(odds: number[], h: Float64Array | undefined): number | null {
+    let total = 0;
+    const weights = odds.map((p, o) => (p > 0 ? p * Math.exp(EXPLORE_FEEDBACK * (h ? h[o] : 0)) : 0));
+    for (const w of weights) total += w;
+    if (total <= 0) return null;
+    let x = this.rng() * total;
+    let last = -1;
+    for (let o = 0; o < weights.length; o++) {
+      if (weights[o] <= 0) continue;
+      last = o;
+      x -= weights[o];
+      if (x <= 0) return o;
+    }
+    return last;
   }
 
   /** SMDP update after an option ran for `k` ticks and returned discounted reward `reward`. */

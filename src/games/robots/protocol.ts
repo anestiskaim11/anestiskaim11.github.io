@@ -1,14 +1,19 @@
 import type { OptionKind } from "./sim/options";
 import type { Role } from "./sim/robots";
-import type { EpisodeCard, SavedBrain, StrategyGroup, WorldEvent, WorldStats } from "./sim/world";
+import type { EpisodeCard, EpisodeReview, ReviewRating, SavedBrain, StrategyGroup, WorldEvent, WorldStats } from "./sim/world";
 
 export type ToWorker =
-  | { type: "init"; levelId: string; seed: number; brain: SavedBrain | null; wasMastered: boolean }
+  | { type: "init"; levelId: string; seed: number; brain: SavedBrain | null; wasMastered: boolean; human: number }
   | { type: "setSpeed"; speed: number }
   | { type: "pause" }
   | { type: "resume" }
   | { type: "feedback"; robot: number | null; value: number }
   | { type: "vote"; episode: number; value: number }
+  | { type: "review"; team: number; ratings: ReviewRating[] }
+  /** Hold a direction (index into DIRS, -1 to release); `tap` guarantees one step. */
+  | { type: "move"; dir: number; tap?: boolean }
+  | { type: "act" }
+  | { type: "goto"; tile: number }
   | { type: "resetLearning" }
   | { type: "quit" };
 
@@ -30,7 +35,8 @@ export interface WorldView {
   tick: number;
   episode: number;
   timeLimit: number;
-  doorsOpen: boolean;
+  /** Per door (indexed like the level's `doors`). */
+  doorOpen: boolean[];
   bridged: boolean[];
   rubble: boolean[];
   blocks: number[];
@@ -40,6 +46,9 @@ export interface WorldView {
   lasersOn: boolean[];
   platePressed: boolean[];
   robots: RobotView[];
+  /** The player's robot, and the ability it could use right now (or null). */
+  human: number;
+  humanAction: string | null;
 }
 
 export interface SnapshotMessage {
@@ -64,4 +73,10 @@ export interface SummaryMessage {
   brain: SavedBrain;
 }
 
-export type FromWorker = SnapshotMessage | StatsMessage | SummaryMessage;
+/** An episode just ended; the world waits for the player's review. */
+export interface ReviewMessage {
+  type: "review";
+  review: EpisodeReview;
+}
+
+export type FromWorker = SnapshotMessage | StatsMessage | SummaryMessage | ReviewMessage;

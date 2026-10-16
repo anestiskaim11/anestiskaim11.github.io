@@ -1,7 +1,7 @@
 import type { ParsedLevel } from "./grid";
 import type { Role } from "./robots";
 
-export type OptionKind = "hack" | "bridge" | "break" | "push" | "hold" | "shield" | "pick" | "deliver" | "pull" | "wait";
+export type OptionKind = "hack" | "bridge" | "break" | "push" | "hold" | "shield" | "pick" | "deliver" | "pull" | "wait" | "wander";
 
 /** A high-level skill a robot can choose. `target` indexes the matching level list (terminals, bridge spots…). */
 export interface OptionDef {
@@ -15,6 +15,9 @@ export const HOLD_TICKS = 15;
 export const WAIT_TICKS = 4;
 
 const numbered = (base: string, i: number, total: number) => (total > 1 ? `${base} ${i + 1}` : base);
+/** Linked switches are named after their channel, matching the numbered pips on the map. */
+const switchName = (base: string, i: number, total: number, channels: number[], level: ParsedLevel) =>
+  level.def.channels ? `${base} ${channels[i] + 1}` : numbered(base, i, total);
 
 /** The options available to a role on a level (filtered later by world state). */
 export function optionsForRole(role: Role, level: ParsedLevel): OptionDef[] {
@@ -27,7 +30,7 @@ export function optionsForRole(role: Role, level: ParsedLevel): OptionDef[] {
       add("deliver", 0, "Deliver core");
       break;
     case "hacker":
-      level.terminals.forEach((_, i) => add("hack", i, numbered("Hack terminal", i, level.terminals.length)));
+      level.terminals.forEach((_, i) => add("hack", i, switchName("Hack terminal", i, level.terminals.length, level.terminalChannel, level)));
       break;
     case "builder":
       level.bridgeSpots.forEach((_, i) => add("bridge", i, numbered("Build bridge", i, level.bridgeSpots.length)));
@@ -39,7 +42,7 @@ export function optionsForRole(role: Role, level: ParsedLevel): OptionDef[] {
       if (level.plates.length) level.blocks.forEach((_, i) => add("push", i, numbered("Push block to plate", i, level.blocks.length)));
       break;
     case "shield":
-      level.laserRuns.forEach((_, i) => add("shield", i, numbered("Block laser", i, level.laserRuns.length)));
+      level.laserRuns.forEach((_, i) => add("shield", i, switchName("Block laser", i, level.laserRuns.length, level.laserRunChannel, level)));
       break;
     case "magnet":
       add("pull", 0, "Pull core");
@@ -49,11 +52,13 @@ export function optionsForRole(role: Role, level: ParsedLevel): OptionDef[] {
   }
   // Anyone but the Lifter can stand on a plate to switch lasers off.
   if (role !== "lifter" && level.laserRuns.length) {
-    level.plates.forEach((_, i) => add("hold", i, numbered("Hold plate", i, level.plates.length)));
+    level.plates.forEach((_, i) => add("hold", i, switchName("Hold plate", i, level.plates.length, level.plateChannel, level)));
   }
   add("wait", 0, "Wait");
+  // A novice's aimless stroll: only ever picked while exploring, never on purpose.
+  add("wander", 0, "Wander off");
   return out;
 }
 
 /** Options that count as part of a team strategy (shown on strategy cards). */
-export const isStrategic = (kind: OptionKind) => kind !== "wait";
+export const isStrategic = (kind: OptionKind) => kind !== "wait" && kind !== "wander";

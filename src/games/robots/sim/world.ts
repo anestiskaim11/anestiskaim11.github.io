@@ -9,14 +9,27 @@ import type { Role } from "./robots";
 import { solvePoints } from "./score";
 
 const PULL_RANGE = 5;
-const EPSILON_START = 0.4;
-const EPSILON_DECAY = 0.98;
+/** Fresh robots are clumsy: mostly random moves at first, settling down over a few dozen episodes. */
+const EPSILON_START = 0.9;
+const EPSILON_DECAY = 0.97;
 const EPSILON_MIN = 0.05;
+/** How much likelier an exploring robot is to wander off than to try any one real move. */
+const WANDER_ODDS = 3;
+/** Every bit of coaching a robot gets makes it explore less (×0.9 per teammate rating). */
+const COACH_DECAY = 0.9;
 const RESULTS_WINDOW = 20;
 const MASTERY_RATE = 0.8;
 const CARD_HISTORY = 12;
 const INFLUENCE_WINDOW = 200;
 const CARD_VOTE_WEIGHT = 0.7;
+/** End-of-episode ratings: full credit to decisions that match the verdict, partial to the rest. */
+const REVIEW_WEIGHT = 0.7;
+const REVIEW_OFF_WEIGHT = 0.3;
+const TEAM_REVIEW_WEIGHT = 0.5;
+/** Skills the player never triggers with the action key: standing still on a plate or in a beam is enough. */
+const PASSIVE_KINDS = new Set(["wait", "wander", "hold", "shield"]);
+/** Skills the player's robot starts on its own when it steps onto the right tile. */
+const AUTO_KINDS = new Set(["pick", "deliver"]);
 
 type Phase = "go" | "act" | "hold" | "push";
 
@@ -47,6 +60,12 @@ export interface Robot {
   finishing: "success" | "failed" | null;
   /** Whether the current option actually helped (counts toward the strategy). */
   helped: boolean;
+  /** The decision record for the current option (AI robots only). */
+  decision: Decision | null;
+  /** How much feedback this robot has had; coached robots explore less. */
+  coached: number;
+  /** Where a wandering robot is strolling to. */
+  wanderTo: number;
 }
 
 export interface Decision {
@@ -54,12 +73,36 @@ export interface Decision {
   state: string;
   option: number;
   tick: number;
+  /** Set once the option finishes: whether it actually moved the team forward. */
+  helped?: boolean;
 }
 
 export interface StrategyStep {
   robot: number;
   role: Role;
   label: string;
+  /** Done by the player's robot. */
+  human?: boolean;
+}
+
+/** What one AI teammate did during an episode, for the end-of-episode review. */
+export interface TeammateRecap {
+  robot: number;
+  role: Role;
+  zapped: boolean;
+  moves: { label: string; count: number; helped: boolean }[];
+}
+
+export interface EpisodeReview {
+  card: EpisodeCard;
+  /** Useful things the player's robot did this episode. */
+  yourMoves: string[];
+  teammates: TeammateRecap[];
+}
+
+export interface ReviewRating {
+  robot: number;
+  value: number;
 }
 
 export interface EpisodeCard {
@@ -99,6 +142,11 @@ export interface WorldStats {
   solvePoints: number;
   mastered: boolean;
   newlyMastered: boolean;
+  /** Useful actions by the player's robot. */
+  contributions: number;
+  /** Episodes reviewed, and teammate ratings given in those reviews. */
+  reviews: number;
+  ratings: number;
 }
 
 export interface SavedBrain {
@@ -111,12 +159,17 @@ export interface WorldOptions {
   brain?: SavedBrain | null;
   /** Whether the level was already mastered before this session (for the mastery bonus). */
   wasMastered?: boolean;
+  /** Index of the robot the player drives by hand; it never learns or decides on its own. */
+  human?: number | null;
+  /** Freeze after each episode until `review` is called. */
+  requireReview?: boolean;
 }
 
 /**
  * Cooperative multi-robot world. Each robot is an independent SMDP Q-learner
- * choosing high-level options; all share the team reward. Training is
- * endless: episodes reset automatically on success or timeout.
+ * choosing high-level options; all share the team reward. One robot may be
+ * driven by the player instead. Episodes reset automatically on success or
+ * timeout, optionally pausing for the player's review in between.
  */
 export class World {
   readonly level: ParsedLevel;
@@ -127,7 +180,8 @@ export class World {
   events: WorldEvent[] = [];
 
   // Dynamic state.
-  doorsOpen = false;
+  /** Per switch channel: whether its doors have been hacked open. */
+  channelOpen: boolean[] = [];
   bridged: boolean[] = [];
   rubble: boolean[] = [];
   blocks: number[] = [];
@@ -157,11 +211,27 @@ export class World {
   private mastered: boolean;
   private readonly wasMastered: boolean;
 
+  readonly human: number | null;
+  private readonly requireReview: boolean;
+  /** The review waiting for the player; the world is frozen while set. */
+  pendingReview: EpisodeReview | null = null;
+  private reviewDecisions: Decision[] = [];
+  private humanDir = -1;
+  private humanTap = -1;
+  private humanActQueued = false;
+  private humanMoves: string[] = [];
+  private humanEnabled = false;
+  private contributions = 0;
+  private reviews = 0;
+  private ratings = 0;
+
   constructor(def: LevelDef, options: WorldOptions = {}) {
     this.rng = createRng(options.seed ?? Date.now());
     this.level = parseLevel(def);
     this.wasMastered = !!options.wasMastered;
     this.mastered = this.wasMastered;
+    this.human = options.human ?? null;
+    this.requireReview = !!options.requireReview;
     this.robots = def.robots.map((role, id) => {
       const opts = optionsForRole(role, this.level);
       return {
@@ -187,6 +257,9 @@ export class World {
         blockPath: [],
         finishing: null,
         helped: false,
+        decision: null,
+        coached: 0,
+        wanderTo: -1,
       };
     });
     if (options.brain && options.brain.robots.length === this.robots.length) {
@@ -196,8 +269,27 @@ export class World {
     this.resetEpisode();
   }
 
+  /** Whether every door on the level is open. */
+  get doorsOpen() {
+    return this.level.doorChannel.every((ch) => this.channelOpen[ch]);
+  }
+
+  doorOpenAt(tile: number) {
+    const L = this.level;
+    return this.channelOpen[L.doorChannel[L.doorIndexOf[tile]]];
+  }
+
   get epsilon() {
     return Math.max(EPSILON_MIN, EPSILON_START * Math.pow(EPSILON_DECAY, this.episodesTrained));
+  }
+
+  /** A robot's own exploration rate: the team's, lowered by the coaching it has had. */
+  epsilonOf(r: Robot) {
+    return Math.max(EPSILON_MIN, this.epsilon * Math.pow(COACH_DECAY, r.coached));
+  }
+
+  private coach(robot: number | null, amount: number) {
+    for (const r of this.robots) if (r.id !== this.human && (robot === null || r.id === robot)) r.coached += amount;
   }
 
   stats(): WorldStats {
@@ -216,6 +308,9 @@ export class World {
       solvePoints: this.solvePointsTotal,
       mastered: this.mastered,
       newlyMastered: this.mastered && !this.wasMastered,
+      contributions: this.contributions,
+      reviews: this.reviews,
+      ratings: this.ratings,
     };
   }
 
@@ -224,7 +319,10 @@ export class World {
   }
 
   resetLearning() {
-    for (const r of this.robots) r.learner.reset();
+    for (const r of this.robots) {
+      r.learner.reset();
+      r.coached = 0;
+    }
     this.episodesTrained = 0;
     this.history.length = 0;
     this.cards.length = 0;
@@ -241,7 +339,9 @@ export class World {
    * Credit flows to recent decisions with exponentially decaying weight.
    */
   feedback(robot: number | null, value: number, tauTicks: number) {
+    if (robot !== null && robot === this.human) return;
     this.feedbackCount++;
+    this.coach(robot, robot === null ? 0.25 : 0.5);
     for (const d of this.decisions) {
       if (robot !== null && d.robot !== robot) continue;
       const weight = Math.exp(-(this.tick - d.tick) / Math.max(1, tauTicks));
@@ -257,7 +357,132 @@ export class World {
     if (!card || !decisions || card.vote === value) return;
     card.vote = value;
     this.feedbackCount++;
+    this.coach(null, 0.25);
     for (const d of decisions) this.robots[d.robot].learner.human(d.state, d.option, value, CARD_VOTE_WEIGHT);
+  }
+
+  /**
+   * The player's end-of-episode review: an optional verdict on the whole team
+   * plus optional ratings for single teammates (the UI asks for at least one).
+   * A robot's 👍 mostly reinforces its moves that helped and a 👎 mostly
+   * discourages the ones that didn't. The team verdict only ever touches the
+   * matching moves, so a 👎 on a failed run never punishes the steps that
+   * made progress. Unfreezes the world.
+   */
+  review(team: number, ratings: ReviewRating[]) {
+    const pending = this.pendingReview;
+    if (!pending) return;
+    const card = this.cards.find((c) => c.episode === pending.card.episode);
+    if (team !== 0) {
+      if (card) card.vote = team;
+      this.coach(null, 0.5);
+      for (const d of this.reviewDecisions) {
+        if (d.robot !== this.human && (team > 0) === !!d.helped) this.robots[d.robot].learner.human(d.state, d.option, team, TEAM_REVIEW_WEIGHT);
+      }
+    }
+    for (const { robot, value } of ratings) {
+      if (robot === this.human || value === 0 || !this.robots[robot]) continue;
+      this.ratings++;
+      this.coach(robot, 1);
+      for (const d of this.reviewDecisions) {
+        if (d.robot !== robot) continue;
+        const matches = (value > 0) === !!d.helped;
+        this.robots[robot].learner.human(d.state, d.option, value, REVIEW_WEIGHT * (matches ? 1 : REVIEW_OFF_WEIGHT));
+      }
+    }
+    if (team !== 0 || ratings.some((r) => r.value !== 0)) this.reviews++;
+    this.reviewDecisions = [];
+    this.pendingReview = null;
+  }
+
+  // ---------------------------------------------------------------- player control
+
+  /** Hold (or release, with -1) a direction for the player's robot; `tap` guarantees at least one step. */
+  humanMove(dir: number, tap = false) {
+    if (this.human === null) return;
+    this.humanDir = dir;
+    if (tap && dir >= 0) this.humanTap = dir;
+  }
+
+  /** Use the player's ability at their current tile on the next tick. */
+  humanAct() {
+    if (this.human !== null) this.humanActQueued = true;
+  }
+
+  /** Walk the player's robot to `tile` along the shortest path. */
+  humanGoto(tile: number) {
+    if (this.human === null || this.pendingReview) return;
+    const r = this.robots[this.human];
+    if (!r.active || r.option >= 0 || r.air) return;
+    const path = findPath(this.pathContext(r), r.pos, (t) => t === tile);
+    if (!path) return;
+    r.path = path;
+    r.goal = path.length ? tile : -1;
+    this.humanDir = -1;
+  }
+
+  /** The ability the player's robot could use right where it stands, or -1. */
+  humanActionHere(): number {
+    if (this.human === null) return -1;
+    const r = this.robots[this.human];
+    if (!r.active || r.option >= 0 || r.air) return -1;
+    const avail = this.available(r);
+    return r.options.findIndex((o, i) => avail[i] && !PASSIVE_KINDS.has(o.kind) && !!this.goalFor(r, o)?.(r.pos));
+  }
+
+  private stepHuman(r: Robot) {
+    const tap = this.humanTap;
+    const act = this.humanActQueued;
+    this.humanTap = -1;
+    this.humanActQueued = false;
+    if (!r.active) return;
+    if (r.option >= 0) return this.advance(r);
+    if (r.air) return this.moveAlong(r);
+
+    if (act && this.startHumanAction(r)) return;
+    const dir = tap >= 0 ? tap : this.humanDir;
+    if (dir >= 0) {
+      r.path = this.stepToward(r, dir);
+      r.goal = -1;
+    }
+    const next = r.path[0];
+    if (next && !next.air && !this.passable(next.tile, r.role)) r.path = [];
+    this.moveAlong(r);
+    if (!r.path.length) r.goal = -1;
+    if (!r.air) {
+      const here = this.humanActionHere();
+      if (here >= 0 && AUTO_KINDS.has(r.options[here].kind)) this.startHumanAction(r);
+    }
+  }
+
+  /** One tile in `dir`, or a hop over a one-tile gap for the Jumper. */
+  private stepToward(r: Robot, dir: number): Step[] {
+    const { cols, rows } = this.level;
+    const [dx, dy] = DIRS[dir];
+    const x = (r.pos % cols) + dx;
+    const y = Math.floor(r.pos / cols) + dy;
+    if (x < 0 || y < 0 || x >= cols || y >= rows) return [];
+    const next = y * cols + x;
+    if (this.passable(next, r.role)) return [{ tile: next, air: false }];
+    const lx = x + dx;
+    const ly = y + dy;
+    if (r.role !== "jumper" || !this.isGap(next) || lx < 0 || ly < 0 || lx >= cols || ly >= rows) return [];
+    const land = ly * cols + lx;
+    return this.passable(land, r.role) ? [{ tile: next, air: true }, { tile: land, air: false }] : [];
+  }
+
+  private startHumanAction(r: Robot): boolean {
+    const option = this.humanActionHere();
+    if (option < 0) return false;
+    r.option = option;
+    r.phase = "go";
+    r.path = [];
+    r.goal = -1;
+    r.reward = 0;
+    r.k = 0;
+    r.helped = false;
+    this.arrive(r, r.options[option]);
+    return true;
   }
 
   /** Makes a robot start a specific option now (used by tests and scripted demos). */
@@ -279,11 +504,14 @@ export class World {
   // ---------------------------------------------------------------- simulation
 
   step() {
+    if (this.pendingReview) return;
     this.tick++;
     for (const r of this.robots) r.prev = r.pos;
 
-    for (const r of this.robots) if (r.active && r.option < 0) this.decide(r);
-    for (const r of this.robots) if (r.active && r.option >= 0) this.advance(r);
+    const ai = this.robots.filter((r) => r.id !== this.human);
+    for (const r of ai) if (r.active && r.option < 0) this.decide(r);
+    for (const r of ai) if (r.active && r.option >= 0) this.advance(r);
+    if (this.human !== null) this.stepHuman(this.robots[this.human]);
 
     this.updateLasers();
     this.creditEnablers();
@@ -318,12 +546,14 @@ export class World {
   // ---------------------------------------------------------------- decisions
 
   stateKey(r: Robot): string {
+    // One bit per door channel and per laser run; single-switch levels keep their original one-bit keys.
+    const doorChannels = [...new Set(this.level.doorChannel)];
     const bits = [
-      this.doorsOpen ? 1 : 0,
+      ...(doorChannels.length ? doorChannels.map((ch) => (this.channelOpen[ch] ? 1 : 0)) : [0]),
       ...this.bridged.map(Number),
       ...this.rubble.map(Number),
       ...this.blocks.map((b) => (this.level.plates.includes(b) ? 1 : 0)),
-      this.lasersOn.some(Boolean) ? 1 : 0,
+      ...(this.lasersOn.length > 1 ? this.lasersOn.map(Number) : [this.lasersOn.some(Boolean) ? 1 : 0]),
     ].join("");
     const core = this.holder >= 0 ? `h${this.holder === r.id ? "me" : this.holder}` : `c${this.core}`;
     const region = this.level.regions[r.pos];
@@ -334,7 +564,7 @@ export class World {
     return r.options.map((o) => {
       switch (o.kind) {
         case "hack":
-          return !this.doorsOpen;
+          return !this.channelOpen[this.level.terminalChannel[o.target]];
         case "bridge":
           return !this.bridged[o.target];
         case "break":
@@ -353,13 +583,35 @@ export class World {
           return this.holder < 0 && !this.delivered;
         case "wait":
           return true;
+        case "wander":
+          return false;
       }
     });
   }
 
+  /**
+   * What an exploring robot may try: everything available, plus pointless
+   * repeats (hacking an open terminal, re-building a built bridge) that waste
+   * its time until it learns better or is told off.
+   */
+  private explorable(r: Robot): number[] {
+    const avail = this.available(r);
+    return r.options.map((o, i) => (o.kind === "wander" ? WANDER_ODDS : avail[i] || o.kind === "hack" || o.kind === "bridge" ? 1 : 0));
+  }
+
+  /** A random walkable tile for a wandering robot, or -1. */
+  private wanderTarget(r: Robot): number {
+    const L = this.level;
+    for (let tries = 0; tries < 20; tries++) {
+      const t = Math.floor(this.rng() * L.tiles.length);
+      if (t !== r.pos && L.tiles[t] !== TILE.Laser && this.passable(t, r.role)) return t;
+    }
+    return -1;
+  }
+
   private decide(r: Robot) {
     const state = this.stateKey(r);
-    const choice = r.learner.choose(state, this.available(r), this.epsilon);
+    const choice = r.learner.choose(state, this.available(r), this.epsilonOf(r), this.explorable(r));
     if (choice.option < 0) return;
     if (choice.greedy) {
       this.influence.push(choice.humanSwayed);
@@ -375,7 +627,9 @@ export class World {
     r.reward = 0;
     r.k = 0;
     r.helped = false;
-    this.decisions.push({ robot: r.id, state, option: choice.option, tick: this.tick });
+    r.wanderTo = r.options[choice.option].kind === "wander" ? this.wanderTarget(r) : -1;
+    r.decision = { robot: r.id, state, option: choice.option, tick: this.tick };
+    this.decisions.push(r.decision);
   }
 
   /** Queue an option to finish at the end of this tick, after its share of the tick's reward. */
@@ -387,10 +641,32 @@ export class World {
   private completeOption(r: Robot, terminal: boolean) {
     if (r.option < 0) return;
     const opt = r.options[r.option];
+    if (r.id === this.human) {
+      if (r.finishing === "success" && r.helped) this.humanContributed(opt.label);
+    } else this.settleOption(r, opt, terminal);
+    r.option = -1;
+    r.finishing = null;
+    r.goal = -1;
+    r.path = [];
+    r.blockPath = [];
+    r.decision = null;
+  }
+
+  private humanContributed(label: string) {
+    const r = this.robots[this.human!];
+    this.contributions++;
+    this.humanMoves.push(label);
+    const last = this.steps[this.steps.length - 1];
+    if (!last || last.robot !== r.id || last.label !== label) this.steps.push({ robot: r.id, role: r.role, label, human: true });
+  }
+
+  /** Learning update for an AI robot's finished option. */
+  private settleOption(r: Robot, opt: OptionDef, terminal: boolean) {
+    if (r.decision) r.decision.helped = r.helped;
     let reward = r.reward;
     if (r.finishing === "failed") reward += REWARDS.failedOption;
     // Idling (or holding a plate nobody needed) carries a small individual cost.
-    if (opt.kind === "wait" || ((opt.kind === "hold" || opt.kind === "shield") && !r.helped)) reward += REWARDS.wait;
+    if (opt.kind === "wait" || opt.kind === "wander" || ((opt.kind === "hold" || opt.kind === "shield") && !r.helped)) reward += REWARDS.wait;
     if (r.helped) reward += REWARDS.contribution;
     const next = this.stateKey(r);
     r.learner.update(r.decisionState, r.option, reward, Math.max(1, r.k), next, this.available(r), terminal);
@@ -399,11 +675,6 @@ export class World {
       const last = this.steps[this.steps.length - 1];
       if (!last || last.robot !== r.id || last.label !== opt.label) this.steps.push({ robot: r.id, role: r.role, label: opt.label });
     }
-    r.option = -1;
-    r.finishing = null;
-    r.goal = -1;
-    r.path = [];
-    r.blockPath = [];
   }
 
   // ---------------------------------------------------------------- option execution
@@ -480,6 +751,8 @@ export class World {
       }
       case "wait":
         return () => true;
+      case "wander":
+        return r.wanderTo >= 0 ? (t) => t === r.wanderTo : null;
     }
   }
 
@@ -504,15 +777,17 @@ export class World {
   private applyEffect(r: Robot, opt: OptionDef) {
     const L = this.level;
     switch (opt.kind) {
-      case "hack":
-        if (!this.doorsOpen) {
-          this.doorsOpen = true;
+      case "hack": {
+        const ch = L.terminalChannel[opt.target];
+        if (!this.channelOpen[ch]) {
+          this.channelOpen[ch] = true;
           r.helped = true;
-          this.subgoal("doors");
+          this.subgoal(`doors${ch}`);
           this.changed();
           this.events.push({ type: "hack", robot: r.id, tile: L.terminals[opt.target] });
         }
         break;
+      }
       case "bridge":
         if (!this.bridged[opt.target]) {
           this.bridged[opt.target] = true;
@@ -619,7 +894,7 @@ export class World {
       case TILE.BridgeSpot:
         return this.bridged[L.bridgeIndexOf[i]];
       case TILE.Door:
-        return this.doorsOpen;
+        return this.doorOpenAt(i);
       case TILE.Laser:
         if (this.lasersOn[L.laserRunOf[i]] && role !== "shield") return false;
         break;
@@ -698,7 +973,7 @@ export class World {
   private blocksLine(t: number) {
     const L = this.level;
     const tile = L.tiles[t];
-    if (tile === TILE.Wall || (tile === TILE.Door && !this.doorsOpen)) return true;
+    if (tile === TILE.Wall || (tile === TILE.Door && !this.doorOpenAt(t))) return true;
     const ri = L.rubbleIndexOf[t];
     return (ri >= 0 && this.rubble[ri]) || this.blocks.includes(t);
   }
@@ -708,7 +983,7 @@ export class World {
     const tile = L.tiles[t];
     if (tile === TILE.Wall || tile === TILE.Gap || tile === TILE.Reactor) return false;
     if (tile === TILE.BridgeSpot && !this.bridged[L.bridgeIndexOf[t]]) return false;
-    if (tile === TILE.Door && !this.doorsOpen) return false;
+    if (tile === TILE.Door && !this.doorOpenAt(t)) return false;
     const ri = L.rubbleIndexOf[t];
     if (ri >= 0 && this.rubble[ri]) return false;
     return !this.blocks.some((b, i) => i !== block && b === t) && t !== this.core;
@@ -730,12 +1005,16 @@ export class World {
     this.platePressed = L.plates.map(
       (p) => this.blocks.includes(p) || this.robots.some((r) => r.active && !r.air && r.pos === p),
     );
-    const plateOn = this.platePressed.some(Boolean);
+    // A run is off while a plate on its channel is pressed, or a Shield stands in it.
     const next = L.laserRuns.map(
-      (run) => !plateOn && !this.robots.some((r) => r.active && r.role === "shield" && run.includes(r.pos)),
+      (run, ri) =>
+        !L.plates.some((_, pi) => this.platePressed[pi] && L.plateChannel[pi] === L.laserRunChannel[ri]) &&
+        !this.robots.some((r) => r.active && r.role === "shield" && run.includes(r.pos)),
     );
     if (next.some((on, i) => on !== this.lasersOn[i])) {
-      if (next.some((on, i) => !on && this.lasersOn[i])) this.subgoal("lasers");
+      next.forEach((on, i) => {
+        if (!on && this.lasersOn[i]) this.subgoal(`lasers${i}`);
+      });
       this.lasersOn = next;
       this.changed();
     }
@@ -755,12 +1034,22 @@ export class World {
       const kind = r.options[r.option].kind;
       if ((kind === "hold" || kind === "shield") && this.laserOnWithout(run, r.id)) r.helped = true;
     }
+    // The player holds plates and beams just by standing there; credit it once per episode.
+    if (this.human === null || this.humanEnabled || this.human === this.holder) return;
+    const h = this.robots[this.human];
+    if (h.active && !h.air && this.laserOnWithout(run, h.id)) {
+      this.humanEnabled = true;
+      this.humanContributed(this.level.laserRunOf[h.pos] >= 0 ? "Block laser" : "Hold plate");
+    }
   }
 
   private laserOnWithout(run: number, excluded: number) {
     const L = this.level;
     const present = (r: Robot) => r.id !== excluded && r.active && !r.air;
-    const plateOn = L.plates.some((p) => this.blocks.includes(p) || this.robots.some((r) => present(r) && r.pos === p));
+    const plateOn = L.plates.some(
+      (p, pi) =>
+        L.plateChannel[pi] === L.laserRunChannel[run] && (this.blocks.includes(p) || this.robots.some((r) => present(r) && r.pos === p)),
+    );
     const shielded = this.robots.some((r) => present(r) && r.role === "shield" && L.laserRuns[run].includes(r.pos));
     return !plateOn && !shielded;
   }
@@ -825,8 +1114,13 @@ export class World {
       group.successes++;
       group.ticks += ticks;
     }
-    this.cards.push({ episode: this.episode, success, ticks, reward: Math.round(this.episodeReward), steps: this.steps.slice(), strategy: group.name, vote: 0 });
+    const card: EpisodeCard = { episode: this.episode, success, ticks, reward: Math.round(this.episodeReward), steps: this.steps.slice(), strategy: group.name, vote: 0 };
+    this.cards.push(card);
     this.pastDecisions.set(this.episode, this.stepDecisions);
+    if (this.requireReview) {
+      this.pendingReview = { card, yourMoves: this.humanMoves.slice(), teammates: this.recaps() };
+      this.reviewDecisions = this.decisions;
+    }
     if (this.cards.length > CARD_HISTORY) {
       const old = this.cards.shift()!;
       this.pastDecisions.delete(old.episode);
@@ -835,10 +1129,28 @@ export class World {
     this.resetEpisode();
   }
 
+  /** Each AI teammate's moves this episode, with repeats folded together. */
+  private recaps(): TeammateRecap[] {
+    return this.robots
+      .filter((r) => r.id !== this.human)
+      .map((r) => {
+        const moves: TeammateRecap["moves"] = [];
+        for (const d of this.decisions) {
+          if (d.robot !== r.id) continue;
+          const label = r.options[d.option].label;
+          const helped = !!d.helped;
+          const last = moves[moves.length - 1];
+          if (last && last.label === label && last.helped === helped) last.count++;
+          else moves.push({ label, count: 1, helped });
+        }
+        return { robot: r.id, role: r.role, zapped: !r.active, moves };
+      });
+  }
+
   private resetEpisode() {
     const L = this.level;
     this.tick = 0;
-    this.doorsOpen = false;
+    this.channelOpen = Array.from({ length: L.channelCount }, () => false);
     this.bridged = L.bridgeSpots.map(() => false);
     this.rubble = L.rubble.map(() => true);
     this.blocks = L.blocks.slice();
@@ -853,6 +1165,11 @@ export class World {
     this.steps = [];
     this.decisions = [];
     this.stepDecisions = [];
+    this.humanMoves = [];
+    this.humanEnabled = false;
+    this.humanDir = -1;
+    this.humanTap = -1;
+    this.humanActQueued = false;
     this.robots.forEach((r, i) => {
       Object.assign(r, {
         pos: L.spawns[i],
@@ -871,6 +1188,7 @@ export class World {
         blockPath: [],
         finishing: null,
         helped: false,
+        decision: null,
       });
     });
     this.lastPotential = this.currentPotential();

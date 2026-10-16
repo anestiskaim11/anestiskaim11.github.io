@@ -2,12 +2,13 @@ import { X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { cn } from "@/lib/utils";
 import { RobotClient } from "../client";
-import type { RobotView, SummaryMessage, WorldView } from "../protocol";
+import type { ReviewMessage, RobotView, SummaryMessage, WorldView } from "../protocol";
 import { RobotRenderer } from "../render/RobotRenderer";
 import { parseLevel } from "../sim/grid";
 import { getLevel, LEVELS } from "../sim/levels";
+import type { Role } from "../sim/robots";
 import { computeScore, type ScoreBreakdown } from "../sim/score";
-import type { EpisodeCard, StrategyGroup, WorldStats } from "../sim/world";
+import type { EpisodeCard, EpisodeReview as Review, ReviewRating, StrategyGroup, WorldStats } from "../sim/world";
 import {
   clearLevelBrain,
   readLevelProgress,
@@ -17,6 +18,8 @@ import {
   type LevelProgress,
   type PersonalBest,
 } from "../storage";
+import { ActionBar } from "./ActionBar";
+import { EpisodeReview } from "./EpisodeReview";
 import { Hud } from "./Hud";
 import { PauseOverlay } from "./PauseOverlay";
 import { RosterPanel } from "./RosterPanel";
@@ -25,7 +28,7 @@ import { StartScreen } from "./StartScreen";
 import { StrategyFeed } from "./StrategyFeed";
 import { SPEEDS, Toolbar } from "./Toolbar";
 
-type Phase = "menu" | "playing" | "paused" | "ending" | "summary";
+type Phase = "menu" | "playing" | "paused" | "review" | "ending" | "summary";
 
 interface Summary {
   breakdown: ScoreBreakdown;
@@ -36,6 +39,32 @@ interface Summary {
 
 const ROSTER_REFRESH_MS = 150;
 const readAllProgress = () => Object.fromEntries(LEVELS.map((l) => [l.id, readLevelProgress(l.id)]));
+
+/** Movement keys -> index into the world's DIRS (right, left, down, up). */
+const MOVE_KEYS: Record<string, number> = {
+  ArrowRight: 0, d: 0, D: 0,
+  ArrowLeft: 1, a: 1, A: 1,
+  ArrowDown: 2, s: 2, S: 2,
+  ArrowUp: 3, w: 3, W: 3,
+};
+
+/** The player's role on a level: their pick if that robot is on the team, else the Lifter. */
+const playableRole = (levelId: string, role: Role) => {
+  const roster = getLevel(levelId).robots;
+  return roster.includes(role) ? role : roster[0];
+};
+
+const scoreOf = (s: WorldStats, episodes: number) =>
+  computeScore({
+    episodes,
+    solves: s.solves,
+    solvePoints: s.solvePoints,
+    newlyMastered: s.newlyMastered,
+    feedbackCount: s.feedbackCount,
+    contributions: s.contributions,
+    reviews: s.reviews,
+    ratings: s.ratings,
+  });
 
 /** Full-screen "Robot Trainer" game. `onExit` closes the host dialog. */
 export function RobotGame({ onExit }: { onExit: () => void }) {
@@ -65,6 +94,12 @@ export function RobotGame({ onExit }: { onExit: () => void }) {
   const [progress, setProgress] = useState<Record<string, LevelProgress>>(readAllProgress);
   const [teamOpen, setTeamOpen] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [humanRole, setHumanRole] = useState<Role>("lifter");
+  const [review, setReview] = useState<Review | null>(null);
+  const [humanAction, setHumanAction] = useState<string | null>(null);
+  const heldDirRef = useRef(-1);
+  /** Where quitting leads: the score summary, or straight back to the level picker. */
+  const afterQuitRef = useRef<"summary" | "menu">("summary");
 
   const levelRef = useRef(levelId);
   levelRef.current = levelId;
@@ -98,7 +133,7 @@ export function RobotGame({ onExit }: { onExit: () => void }) {
       const { width, height } = main.getBoundingClientRect();
       if (!width || !height) return;
       const compact = width < 640;
-      renderer.resize(width, height, { top: compact ? 84 : 160, right: 0, bottom: 72, left: 0 });
+      renderer.resize(width, height, { top: compact ? 84 : 160, right: 0, bottom: 128, left: 0 });
     };
     resize();
     const observer = new ResizeObserver(resize);
@@ -127,7 +162,10 @@ export function RobotGame({ onExit }: { onExit: () => void }) {
   // Throttled roster refresh from the latest snapshot.
   useEffect(() => {
     if (phase !== "playing" && phase !== "paused") return;
-    const id = window.setInterval(() => setRobots(viewRef.current?.robots ?? []), ROSTER_REFRESH_MS);
+    const id = window.setInterval(() => {
+      setRobots(viewRef.current?.robots ?? []);
+      setHumanAction(viewRef.current?.humanAction ?? null);
+    }, ROSTER_REFRESH_MS);
     return () => window.clearInterval(id);
   }, [phase]);
 
@@ -137,13 +175,7 @@ export function RobotGame({ onExit }: { onExit: () => void }) {
     (msg: SummaryMessage) => {
       const id = levelRef.current;
       const s = msg.stats;
-      const breakdown = computeScore({
-        episodes: sessionEpisodes(s),
-        solves: s.solves,
-        solvePoints: s.solvePoints,
-        newlyMastered: s.newlyMastered,
-        feedbackCount: s.feedbackCount,
-      });
+      const breakdown = scoreOf(s, sessionEpisodes(s));
       const previous = readLevelProgress(id);
       saveLevelProgress(id, { mastered: previous.mastered || s.mastered, episodes: s.episodesTrained, brain: msg.brain });
       const result = recordScore(breakdown.total, id);
@@ -154,7 +186,9 @@ export function RobotGame({ onExit }: { onExit: () => void }) {
       clientRef.current = null;
       viewRef.current = null;
       setSelected(null);
-      setPhase("summary");
+      setReview(null);
+      setPhase(afterQuitRef.current);
+      afterQuitRef.current = "summary";
     },
     [setPhase, setSelected],
   );
@@ -162,6 +196,7 @@ export function RobotGame({ onExit }: { onExit: () => void }) {
   const start = useCallback(
     (id: string, continueTraining: boolean) => {
       clientRef.current?.dispose();
+      const role = playableRole(id, humanRole);
       const saved = readLevelProgress(id);
       if (!continueTraining) clearLevelBrain(id);
       const brain = continueTraining ? saved.brain : null;
@@ -176,6 +211,9 @@ export function RobotGame({ onExit }: { onExit: () => void }) {
       setStrategies([]);
       setRobots([]);
       setSummary(null);
+      setReview(null);
+      setHumanAction(null);
+      heldDirRef.current = -1;
       setSelected(null);
       rendererRef.current?.setLevel(parseLevel(getLevel(id)));
 
@@ -192,20 +230,40 @@ export function RobotGame({ onExit }: { onExit: () => void }) {
           setStrategies(msg.strategies);
         },
         onSummary: finish,
+        onReview: (msg: ReviewMessage) => {
+          if (phaseRef.current !== "playing" && phaseRef.current !== "paused") return;
+          heldDirRef.current = -1;
+          setReview(msg.review);
+          setPhase("review");
+        },
       });
       clientRef.current = client;
-      client.send({ type: "init", levelId: id, seed: Math.floor(Math.random() * 2 ** 31), brain, wasMastered: saved.mastered });
+      client.send({
+        type: "init",
+        levelId: id,
+        seed: Math.floor(Math.random() * 2 ** 31),
+        brain,
+        wasMastered: saved.mastered,
+        human: getLevel(id).robots.indexOf(role),
+      });
       client.send({ type: "setSpeed", speed });
       setPhase("playing");
     },
-    [finish, setPhase, setSelected, speed],
+    [finish, humanRole, setPhase, setSelected, speed],
   );
+
+  const releaseMove = useCallback(() => {
+    if (heldDirRef.current < 0) return;
+    heldDirRef.current = -1;
+    clientRef.current?.send({ type: "move", dir: -1 });
+  }, []);
 
   const pause = useCallback(() => {
     if (phaseRef.current !== "playing") return;
+    releaseMove();
     clientRef.current?.send({ type: "pause" });
     setPhase("paused");
-  }, [setPhase]);
+  }, [releaseMove, setPhase]);
 
   const resume = useCallback(() => {
     if (phaseRef.current !== "paused") return;
@@ -213,14 +271,15 @@ export function RobotGame({ onExit }: { onExit: () => void }) {
     setPhase("playing");
   }, [setPhase]);
 
-  const quit = useCallback(() => {
-    if (phaseRef.current !== "playing" && phaseRef.current !== "paused") return;
+  const quit = useCallback((to: "summary" | "menu" = "summary") => {
+    if (phaseRef.current !== "playing" && phaseRef.current !== "paused" && phaseRef.current !== "review") return;
+    afterQuitRef.current = to;
     setPhase("ending");
     clientRef.current?.send({ type: "quit" });
   }, [setPhase]);
 
   const exit = useCallback(() => {
-    if (phaseRef.current === "playing" || phaseRef.current === "paused") quit();
+    if (phaseRef.current === "playing" || phaseRef.current === "paused" || phaseRef.current === "review") quit();
     else if (phaseRef.current !== "ending") onExit();
   }, [onExit, quit]);
 
@@ -233,6 +292,20 @@ export function RobotGame({ onExit }: { onExit: () => void }) {
     if (!clientRef.current) return;
     clientRef.current.send({ type: "feedback", robot, value });
     rendererRef.current?.feedbackPop(robot, value);
+  }, []);
+
+  const submitReview = useCallback(
+    (team: number, ratings: ReviewRating[]) => {
+      if (phaseRef.current !== "review") return;
+      clientRef.current?.send({ type: "review", team, ratings });
+      setReview(null);
+      setPhase("playing");
+    },
+    [setPhase],
+  );
+
+  const act = useCallback(() => {
+    if (phaseRef.current === "playing") clientRef.current?.send({ type: "act" });
   }, []);
 
   const vote = useCallback((episode: number, value: number) => {
@@ -258,63 +331,64 @@ export function RobotGame({ onExit }: { onExit: () => void }) {
         exit();
       } else if (!inGame) {
         return;
-      } else if (e.key === "p" || e.key === "P" || (e.key === " " && !target?.closest("button, [role='button']"))) {
+      } else if (e.key === "p" || e.key === "P") {
         e.preventDefault();
         if (p === "playing") pause();
         else resume();
-      } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      } else if (e.key in MOVE_KEYS) {
         e.preventDefault();
-        feedback(selectedRef.current, e.key === "ArrowUp" ? 1 : -1);
-      } else if (e.key === "Tab") {
-        const count = viewRef.current?.robots.length ?? 0;
-        if (!count) return;
+        const dir = MOVE_KEYS[e.key];
+        if (p !== "playing" || (e.repeat && heldDirRef.current === dir)) return;
+        heldDirRef.current = dir;
+        clientRef.current?.send({ type: "move", dir, tap: true });
+      } else if (e.key === " " || e.key === "e" || e.key === "E") {
+        if (target?.closest("button, [role='button']")) return;
         e.preventDefault();
-        const cur = selectedRef.current;
-        const step = e.shiftKey ? -1 : 1;
-        const next = cur === null ? (step > 0 ? 0 : count - 1) : cur + step;
-        setSelected(next < 0 || next >= count ? null : next);
+        if (!e.repeat) act();
       } else if (["1", "2", "3"].includes(e.key)) {
         setSpeed(SPEEDS[Number(e.key) - 1]);
       }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key in MOVE_KEYS && MOVE_KEYS[e.key] === heldDirRef.current) releaseMove();
     };
     const onHidden = () => {
       if (document.hidden) pause();
     };
     window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", pause);
     document.addEventListener("visibilitychange", onHidden);
     return () => {
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", pause);
       document.removeEventListener("visibilitychange", onHidden);
     };
-  }, [exit, feedback, pause, resume, setSelected, setSpeed]);
+  }, [act, exit, pause, releaseMove, resume, setSpeed]);
 
+  // Click (or tap) a tile to walk your robot there.
   const onCanvasClick = (e: ReactMouseEvent<HTMLCanvasElement>) => {
-    if (phaseRef.current !== "playing" && phaseRef.current !== "paused") return;
+    if (phaseRef.current !== "playing") return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const hit = rendererRef.current?.robotAt(e.clientX - rect.left, e.clientY - rect.top) ?? null;
-    setSelected(hit === selectedRef.current ? null : hit);
+    const tile = rendererRef.current?.tileAt(e.clientX - rect.left, e.clientY - rect.top) ?? -1;
+    if (tile < 0) return;
+    releaseMove();
+    clientRef.current?.send({ type: "goto", tile });
   };
 
-  const liveScore = stats
-    ? computeScore({
-        episodes: sessionEpisodes(stats),
-        solves: stats.solves,
-        solvePoints: stats.solvePoints,
-        newlyMastered: stats.newlyMastered,
-        feedbackCount: stats.feedbackCount,
-      }).total
-    : 0;
-  const inGame = phase === "playing" || phase === "paused" || phase === "ending";
+  const liveScore = stats ? scoreOf(stats, sessionEpisodes(stats)).total : 0;
+  const inGame = phase === "playing" || phase === "paused" || phase === "review" || phase === "ending";
   const level = getLevel(levelId);
+  const role = playableRole(levelId, humanRole);
+  const humanId = level.robots.indexOf(role);
 
   return (
     <div className="flex h-full w-full select-none bg-[#04060b] text-slate-200">
       <div ref={mainRef} className="relative min-w-0 flex-1 overflow-hidden">
         <canvas
           ref={canvasRef}
-          className={cn("absolute inset-0 h-full w-full", inGame && "cursor-pointer")}
+          className={cn("absolute inset-0 h-full w-full", inGame && "cursor-crosshair")}
           onClick={onCanvasClick}
           aria-label={`${level.name} arena`}
         />
@@ -331,6 +405,7 @@ export function RobotGame({ onExit }: { onExit: () => void }) {
         )}
 
         {inGame && <Hud stats={stats} history={history} score={liveScore} levelName={level.name} />}
+        {inGame && <ActionBar role={role} action={humanAction} onAct={act} disabled={phase !== "playing"} />}
         {inGame && (
           <Toolbar
             speed={speed}
@@ -339,12 +414,30 @@ export function RobotGame({ onExit }: { onExit: () => void }) {
             onTogglePause={phase === "paused" ? resume : pause}
             onResetLearning={resetLearning}
             onToggleTeam={() => setTeamOpen((o) => !o)}
-            onQuit={quit}
+            onQuit={() => quit()}
           />
         )}
-        {phase === "paused" && <PauseOverlay stats={stats} score={liveScore} onResume={resume} onQuit={quit} />}
+        {phase === "paused" && <PauseOverlay stats={stats} score={liveScore} onResume={resume} onQuit={() => quit()} />}
+        {phase === "review" && review && (
+          <EpisodeReview
+            key={review.card.episode}
+            review={review}
+            humanRole={role}
+            onSubmit={submitReview}
+            onChangeLevel={() => quit("menu")}
+            onQuit={() => quit()}
+          />
+        )}
         {phase === "menu" && (
-          <StartScreen levelId={levelId} onLevel={setLevelId} onStart={(cont) => start(levelId, cont)} progress={progress} best={best} />
+          <StartScreen
+            levelId={levelId}
+            onLevel={setLevelId}
+            humanRole={role}
+            onHumanRole={setHumanRole}
+            onStart={(cont) => start(levelId, cont)}
+            progress={progress}
+            best={best}
+          />
         )}
         {phase === "summary" && summary && (
           <SessionSummary
@@ -384,7 +477,7 @@ export function RobotGame({ onExit }: { onExit: () => void }) {
               <X className="h-4 w-4" />
             </button>
           </div>
-          <RosterPanel robots={robots} selected={selected} onSelect={setSelected} onFeedback={feedback} />
+          <RosterPanel robots={robots} human={humanId} selected={selected} onSelect={setSelected} onFeedback={feedback} />
           <StrategyFeed cards={cards} strategies={strategies} onVote={vote} />
         </aside>
       )}

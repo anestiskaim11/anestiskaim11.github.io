@@ -1,9 +1,10 @@
-import type { FromWorker, SnapshotMessage, StatsMessage, SummaryMessage, ToWorker } from "./protocol";
+import type { FromWorker, ReviewMessage, SnapshotMessage, StatsMessage, SummaryMessage, ToWorker } from "./protocol";
 
 export interface RobotClientHandlers {
   onSnapshot: (msg: SnapshotMessage) => void;
   onStats: (msg: StatsMessage) => void;
   onSummary: (msg: SummaryMessage) => void;
+  onReview: (msg: ReviewMessage) => void;
 }
 
 /** Typed wrapper around the robot simulation worker. */
@@ -15,6 +16,7 @@ export class RobotClient {
     this.worker.onmessage = ({ data }: MessageEvent<FromWorker>) => {
       if (data.type === "snapshot") handlers.onSnapshot(data);
       else if (data.type === "stats") handlers.onStats(data);
+      else if (data.type === "review") handlers.onReview(data);
       else handlers.onSummary(data);
     };
   }

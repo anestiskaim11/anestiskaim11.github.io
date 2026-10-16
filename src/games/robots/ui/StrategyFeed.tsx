@@ -19,7 +19,7 @@ function Steps({ steps }: { steps: StrategyStep[] }) {
           className="rounded-md border px-1.5 py-0.5 text-[10px] leading-tight"
           style={{ borderColor: `${ROLE_INFO[s.role].color}55`, color: ROLE_INFO[s.role].color }}
         >
-          {ROLE_INFO[s.role].name}: {s.label}
+          {s.human ? "You" : ROLE_INFO[s.role].name}: {s.label}
         </li>
       ))}
     </ol>

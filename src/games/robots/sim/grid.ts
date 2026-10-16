@@ -56,10 +56,18 @@ export interface ParsedLevel {
   laserRunOf: Int16Array;
   bridgeIndexOf: Int16Array;
   rubbleIndexOf: Int16Array;
+  doorIndexOf: Int16Array;
   /** Static room id per tile (doors, gaps, lasers and rubble act as room boundaries), or -1. */
   regions: Int16Array;
   /** BFS distance from the reactor ignoring every dynamic obstacle (used for reward shaping). */
   reactorDist: Int16Array;
+  /** Switch channel per door / terminal / plate / laser run: the overlay digit minus one, or 0 without an overlay. */
+  doorChannel: number[];
+  terminalChannel: number[];
+  plateChannel: number[];
+  laserRunChannel: number[];
+  /** Highest channel id + 1 (1 for levels without a `channels` overlay). */
+  channelCount: number;
 }
 
 export function parseLevel(def: LevelDef): ParsedLevel {
@@ -67,7 +75,7 @@ export function parseLevel(def: LevelDef): ParsedLevel {
   const cols = def.map[0].length;
   const n = cols * rows;
   const tiles = new Uint8Array(n);
-  const p: Omit<ParsedLevel, "def" | "cols" | "rows" | "tiles" | "laserRuns" | "laserRunOf" | "bridgeIndexOf" | "rubbleIndexOf" | "regions" | "reactorDist"> = {
+  const p: Omit<ParsedLevel, "def" | "cols" | "rows" | "tiles" | "laserRuns" | "laserRunOf" | "bridgeIndexOf" | "rubbleIndexOf" | "doorIndexOf" | "doorChannel" | "terminalChannel" | "plateChannel" | "laserRunChannel" | "channelCount" | "regions" | "reactorDist"> = {
     spawns: [],
     core: -1,
     reactor: -1,
@@ -163,19 +171,63 @@ export function parseLevel(def: LevelDef): ParsedLevel {
     }
   }
 
+  const channels = parseChannels(def, cols, rows, p.doors, p.terminals, p.plates, laserRuns);
+
   return {
     def,
     cols,
     rows,
     tiles,
     ...p,
+    ...channels,
     laserRuns,
     laserRunOf,
     bridgeIndexOf: indexOf(p.bridgeSpots),
     rubbleIndexOf: indexOf(p.rubble),
+    doorIndexOf: indexOf(p.doors),
     regions,
     reactorDist,
   };
+}
+
+/** Reads the optional channel overlay and checks every lock has a key. */
+function parseChannels(
+  def: LevelDef,
+  cols: number,
+  rows: number,
+  doors: number[],
+  terminals: number[],
+  plates: number[],
+  laserRuns: number[][],
+) {
+  const overlay = def.channels;
+  if (overlay && (overlay.length !== rows || overlay.some((line) => line.length !== cols))) {
+    throw new Error(`Level ${def.id}: channels overlay must match the map size`);
+  }
+  let channelCount = 1;
+  const channelAt = (i: number) => {
+    if (!overlay) return 0;
+    const ch = overlay[Math.floor(i / cols)][i % cols];
+    if (!/[1-9]/.test(ch)) throw new Error(`Level ${def.id}: switch tile ${i % cols},${Math.floor(i / cols)} needs a channel digit`);
+    channelCount = Math.max(channelCount, Number(ch));
+    return Number(ch) - 1;
+  };
+  const doorChannel = doors.map(channelAt);
+  const terminalChannel = terminals.map(channelAt);
+  const plateChannel = plates.map(channelAt);
+  const laserRunChannel = laserRuns.map((run) => {
+    const chs = new Set(run.map(channelAt));
+    if (chs.size > 1) throw new Error(`Level ${def.id}: a laser run mixes channels`);
+    return [...chs][0];
+  });
+  for (const ch of new Set(doorChannel)) {
+    if (!terminalChannel.includes(ch)) throw new Error(`Level ${def.id}: a door channel has no terminal`);
+  }
+  const hasShield = def.robots.includes("shield");
+  for (const ch of new Set(laserRunChannel)) {
+    if (!plateChannel.includes(ch) && !hasShield) throw new Error(`Level ${def.id}: a laser channel has no plate or Shield`);
+  }
+  return { doorChannel, terminalChannel, plateChannel, laserRunChannel, channelCount };
 }
 
 export function neighbours(i: number, cols: number, rows: number): number[] {

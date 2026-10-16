@@ -47,6 +47,8 @@ const WALL_EDGE = "rgba(129, 140, 248, 0.55)";
 const LASER = "#ff3b5c";
 const CORE = "#fde047";
 const REACTOR = "#34d399";
+/** Colours that tie linked terminals/doors and plates/lasers together. */
+const CHANNEL_COLORS = ["#38bdf8", "#f472b6", "#facc15", "#a3e635", "#c084fc", "#fb923c", "#2dd4bf", "#f87171", "#e2e8f0"];
 
 /** Canvas2D neon renderer for the robot world. */
 export class RobotRenderer {
@@ -65,7 +67,7 @@ export class RobotRenderer {
   private snapshotAt = 0;
   private tickMs = 166;
   private selected: number | null = null;
-  private doorAnim = 0;
+  private doorAnim: number[] = [];
   private rubbleAnim: number[] = [];
   private bridgeAnim: number[] = [];
   private successFlash = 0;
@@ -91,7 +93,7 @@ export class RobotRenderer {
     this.view = null;
     this.rubbleAnim = level.rubble.map(() => 1);
     this.bridgeAnim = level.bridgeSpots.map(() => 0);
-    this.doorAnim = 0;
+    this.doorAnim = level.doors.map(() => 0);
     this.particles = [];
     this.beams = [];
     this.pops = [];
@@ -127,7 +129,7 @@ export class RobotRenderer {
     const prev = this.view;
     this.prevBlocks = prev && prev.episode === msg.view.episode ? prev.blocks : msg.view.blocks;
     if (!prev || prev.episode !== msg.view.episode) {
-      this.doorAnim = msg.view.doorsOpen ? 1 : 0;
+      this.doorAnim = msg.view.doorOpen.map((o) => (o ? 1 : 0));
       this.rubbleAnim = msg.view.rubble.map((r) => (r ? 1 : 0));
       this.bridgeAnim = msg.view.bridged.map((b) => (b ? 1 : 0));
     }
@@ -144,6 +146,14 @@ export class RobotRenderer {
     if (tile === undefined) return;
     const [x, y] = this.center(tile);
     this.pops.push({ x, y: y - this.tile * 0.6, text: value > 0 ? "👍 +1" : "👎 −1", color: value > 0 ? "#86efac" : "#fda4af", life: 1 });
+  }
+
+  /** Map tile under a canvas-relative CSS pixel, or -1. */
+  tileAt(px: number, py: number): number {
+    const x = Math.floor((px - this.ox) / this.tile);
+    const y = Math.floor((py - this.oy) / this.tile);
+    if (x < 0 || y < 0 || x >= this.level.cols || y >= this.level.rows) return -1;
+    return y * this.level.cols + x;
   }
 
   /** Robot under a canvas-relative CSS pixel, or null. */
@@ -185,6 +195,7 @@ export class RobotRenderer {
       this.drawRubble();
       this.drawBlocks(v, t);
       this.drawLasers(v, time);
+      this.drawChannelPips();
       this.drawReactor(time);
       this.drawIntent(v, t);
       this.drawRobots(v, t, time);
@@ -213,7 +224,7 @@ export class RobotRenderer {
 
   private animate(v: WorldView, dt: number) {
     const k = Math.min(1, dt * 4);
-    this.doorAnim += ((v.doorsOpen ? 1 : 0) - this.doorAnim) * k;
+    this.doorAnim = this.doorAnim.map((a, i) => a + ((v.doorOpen[i] ? 1 : 0) - a) * k);
     this.rubbleAnim = this.rubbleAnim.map((a, i) => a + ((v.rubble[i] ? 1 : 0) - a) * k);
     this.bridgeAnim = this.bridgeAnim.map((a, i) => a + ((v.bridged[i] ? 1 : 0) - a) * k);
     this.successFlash = Math.max(0, this.successFlash - dt * 1.2);
@@ -385,25 +396,56 @@ export class RobotRenderer {
   private drawTerminals(v: WorldView, time: number) {
     const { ctx } = this;
     const s = this.tile;
-    for (const t of this.level.terminals) {
+    const L = this.level;
+    L.terminals.forEach((t, ti) => {
       const [cx, cy] = this.center(t);
-      const color = v.doorsOpen ? "#4ade80" : "#22d3ee";
+      // A terminal reads "done" once every door on its channel is open.
+      const done = L.doors.every((_, di) => L.doorChannel[di] !== L.terminalChannel[ti] || v.doorOpen[di]);
+      const color = done ? "#4ade80" : "#22d3ee";
       ctx.fillStyle = "#0f172a";
       this.roundRect(cx - s * 0.32, cy - s * 0.32, s * 0.64, s * 0.64, 4);
       ctx.fill();
       this.glow(color, 12, () => {
         ctx.fillStyle = color;
-        ctx.globalAlpha = v.doorsOpen ? 0.9 : 0.6 + 0.4 * Math.abs(Math.sin(time * 3));
+        ctx.globalAlpha = done ? 0.9 : 0.6 + 0.4 * Math.abs(Math.sin(time * 3));
         ctx.fillRect(cx - s * 0.22, cy - s * 0.2, s * 0.44, s * 0.26);
       });
-    }
+    });
+  }
+
+  /** Numbered colour pips on linked switches, so players can see what opens what. */
+  private drawChannelPips() {
+    const L = this.level;
+    if (L.channelCount < 2) return;
+    const { ctx } = this;
+    const s = this.tile;
+    const pip = (tile: number, ch: number) => {
+      const { cols } = L;
+      const x = this.ox + (tile % cols) * s + s * 0.2;
+      const y = this.oy + Math.floor(tile / cols) * s + s * 0.2;
+      ctx.fillStyle = CHANNEL_COLORS[ch % CHANNEL_COLORS.length];
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(4, s * 0.16), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#020617";
+      ctx.font = `700 ${Math.max(7, s * 0.2)}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(ch + 1), x, y + 0.5);
+    };
+    ctx.save();
+    L.terminals.forEach((t, i) => pip(t, L.terminalChannel[i]));
+    L.doors.forEach((d, i) => pip(d, L.doorChannel[i]));
+    L.plates.forEach((p, i) => pip(p, L.plateChannel[i]));
+    L.laserRuns.forEach((run, i) => pip(run[0], L.laserRunChannel[i]));
+    ctx.restore();
   }
 
   private drawDoors() {
     const { ctx } = this;
     const s = this.tile;
-    const open = this.doorAnim;
-    for (const d of this.level.doors) {
+    this.level.doors.forEach((d, di) => {
+      const open = this.doorAnim[di] ?? 0;
       const [cx, cy] = this.center(d);
       const { cols, tiles } = this.level;
       const vertical = tiles[d - cols] === TILE.Wall || tiles[d + cols] === TILE.Wall;
@@ -419,7 +461,7 @@ export class RobotRenderer {
           ctx.fillRect(cx + s / 2 - half, cy - s * 0.12, half, s * 0.24);
         }
       });
-    }
+    });
   }
 
   private drawRubble() {
@@ -542,8 +584,11 @@ export class RobotRenderer {
   }
 
   private drawIntent(v: WorldView, t: number) {
-    if (this.selected === null) return;
-    const r = v.robots[this.selected];
+    for (const id of new Set([this.selected, v.human])) if (id !== null && id >= 0) this.drawIntentOf(v, id, t);
+  }
+
+  private drawIntentOf(v: WorldView, id: number, t: number) {
+    const r = v.robots[id];
     if (!r || !r.active || r.goal < 0) return;
     const { ctx } = this;
     const [x, y] = this.robotPos(r.pos, r.prev, t);
@@ -612,7 +657,21 @@ export class RobotRenderer {
         ctx.lineTo(x - size * 0.3, y + size * 0.3);
         ctx.stroke();
       }
-      if (selected && r.intent) {
+      if (r.id === v.human) {
+        // "YOU" tag and a bobbing marker over the player's robot.
+        const bob = Math.sin(time * 4) * s * 0.06;
+        const ty = y - size * 0.95 + bob;
+        ctx.fillStyle = "#f8fafc";
+        ctx.beginPath();
+        ctx.moveTo(x - s * 0.12, ty - s * 0.12);
+        ctx.lineTo(x + s * 0.12, ty - s * 0.12);
+        ctx.lineTo(x, ty);
+        ctx.fill();
+        ctx.font = `700 ${Math.max(9, s * 0.26)}px ui-sans-serif, system-ui, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.fillText("YOU", x, ty - s * 0.18);
+      }
+      if (selected && r.intent && r.id !== v.human) {
         ctx.font = `600 ${Math.max(10, s * 0.32)}px ui-sans-serif, system-ui, sans-serif`;
         ctx.textAlign = "center";
         const label = r.intent;
@@ -690,10 +749,14 @@ export class RobotRenderer {
     const L = this.level;
     const color = this.view ? ROLE_INFO[this.view.robots[e.robot]?.role ?? "lifter"].color : "#fff";
     switch (e.type) {
-      case "hack":
-        for (const d of L.doors) this.beam(e.tile, d, "#22d3ee");
+      case "hack": {
+        const ch = L.terminalChannel[L.terminals.indexOf(e.tile)];
+        L.doors.forEach((d, i) => {
+          if (L.doorChannel[i] === ch) this.beam(e.tile, d, "#22d3ee");
+        });
         this.burst(e.tile, "#22d3ee", 14);
         break;
+      }
       case "bridge":
         this.burst(e.tile, "#fb923c", 22);
         break;

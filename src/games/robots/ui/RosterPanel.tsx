@@ -6,6 +6,8 @@ import { ROLE_ICONS } from "./roleIcons";
 
 interface RosterPanelProps {
   robots: RobotView[];
+  /** The player's robot: shown as "You", and not coachable. */
+  human: number;
   selected: number | null;
   onSelect: (id: number | null) => void;
   onFeedback: (robot: number | null, value: number) => void;
@@ -47,19 +49,19 @@ function Thumbs({ onFeedback, label, size = "sm" }: { onFeedback: (v: number) =>
   );
 }
 
-export function RosterPanel({ robots, selected, onSelect, onFeedback }: RosterPanelProps) {
+export function RosterPanel({ robots, human, selected, onSelect, onFeedback }: RosterPanelProps) {
   return (
     <section aria-label="Robot team" className="space-y-2">
       <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
         <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-200">
           <Users className="h-4 w-4 text-cyan-300" />
-          Coach the team
+          Coach your teammates
         </div>
         <div className="flex gap-2">
           <Thumbs label="the whole team" size="lg" onFeedback={(v) => onFeedback(null, v)} />
         </div>
         <p className="mt-2 text-[11px] leading-snug text-slate-500">
-          Rewards credit what robots did in the last ~2 seconds. Select a robot to coach it alone (↑ / ↓, Tab to cycle).
+          Live 👍 / 👎 credit what teammates did in the last ~2 seconds. After every episode you'll rate the team or any of them.
         </p>
       </div>
       <ul className="space-y-1.5">
@@ -67,6 +69,7 @@ export function RosterPanel({ robots, selected, onSelect, onFeedback }: RosterPa
           const info = ROLE_INFO[r.role];
           const Icon = ROLE_ICONS[r.role];
           const isSelected = selected === r.id;
+          const isYou = r.id === human;
           return (
             <li key={r.id}>
               <div
@@ -92,16 +95,19 @@ export function RosterPanel({ robots, selected, onSelect, onFeedback }: RosterPa
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 text-sm font-medium text-slate-200">
                     {info.name}
+                    {isYou && <span className="rounded bg-white/15 px-1 text-[10px] font-semibold text-white">You</span>}
                     {r.carrying && <span className="rounded bg-yellow-400/15 px-1 text-[10px] text-yellow-300">core</span>}
                     {!r.active && <span className="rounded bg-rose-500/15 px-1 text-[10px] text-rose-300">offline</span>}
                   </div>
                   <div className="truncate text-[11px] text-slate-400" title={info.ability}>
-                    {r.active ? (r.intent ? `→ ${r.intent}` : "Thinking…") : "Zapped by a laser"}
+                    {r.active ? (r.intent ? `→ ${r.intent}` : isYou ? "Your move" : "Thinking…") : "Zapped by a laser"}
                   </div>
                 </div>
-                <div className="flex gap-1">
-                  <Thumbs label={info.name} onFeedback={(v) => onFeedback(r.id, v)} />
-                </div>
+                {!isYou && (
+                  <div className="flex gap-1">
+                    <Thumbs label={info.name} onFeedback={(v) => onFeedback(r.id, v)} />
+                  </div>
+                )}
               </div>
             </li>
           );

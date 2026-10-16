@@ -1,7 +1,8 @@
 import type { SavedBrain } from "./sim/world";
 
 const BEST_KEY = "robot-trainer:best";
-const LEVEL_KEY = (id: string) => `robot-trainer:level:${id}`;
+/** v2: robots gained the "Wander off" move, so brains saved before it no longer fit. */
+const LEVEL_KEY = (id: string) => `robot-trainer:level:v2:${id}`;
 /** Skip saving learned tables that would bloat storage. */
 const MAX_BRAIN_CHARS = 400_000;
 

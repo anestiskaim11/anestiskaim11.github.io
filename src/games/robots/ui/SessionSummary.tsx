@@ -18,10 +18,19 @@ interface SessionSummaryProps {
 const fmt = (n: number) => n.toLocaleString();
 
 export function SessionSummary({ breakdown: b, stats, levelName, best, isNewBest, onPlayAgain, onMenu, onClose }: SessionSummaryProps) {
+  const share = (points: number) => (b.total ? ` · ${Math.round((points / b.total) * 100)}%` : "");
   const rows: [string, string, number][] = [
-    ["Solved episodes", `${fmt(b.solves)} of ${fmt(b.episodes)} · tier + speed points`, b.solvePoints],
-    ["Mastery bonus", b.masteryBonus ? "Level mastered this session!" : "Reach 80% success over 20 episodes", b.masteryBonus],
-    ["Coaching bonus", `${fmt(b.feedbackCount)} rewards × ${SCORE_RULES.perFeedback} (max ${SCORE_RULES.maxFeedbackBonus})`, b.feedbackBonus],
+    ["Your play", `${fmt(b.contributions)} useful moves × ${SCORE_RULES.perContribution}${share(b.interactionPoints)}`, b.interactionPoints],
+    [
+      "Your feedback",
+      `${fmt(b.reviews)} reviews × ${SCORE_RULES.perReview} + ${fmt(b.ratings)} ratings × ${SCORE_RULES.perRating} + live taps${share(b.feedbackPoints)}`,
+      b.feedbackPoints,
+    ],
+    [
+      "Team result",
+      `${fmt(b.solves)} of ${fmt(b.episodes)} solved${b.masteryBonus ? " · level mastered!" : ""}${share(b.teamPoints)}`,
+      b.teamPoints,
+    ],
   ];
   const facts: [string, string][] = [
     ["Success rate", `${Math.round(stats.successRate * 100)}%`],
@@ -32,7 +41,7 @@ export function SessionSummary({ breakdown: b, stats, levelName, best, isNewBest
     <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-950/90 p-6 text-slate-200 shadow-2xl animate-fade-in">
         <div className="text-center">
-          <div className="text-xs uppercase tracking-[0.25em] text-slate-400">Training over · {levelName}</div>
+          <div className="text-xs uppercase tracking-[0.25em] text-slate-400">Session over · {levelName}</div>
           {isNewBest && (
             <div className="mx-auto mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-400/15 px-3 py-1 text-sm font-medium text-amber-300">
               <Trophy className="h-4 w-4" />
@@ -68,7 +77,7 @@ export function SessionSummary({ breakdown: b, stats, levelName, best, isNewBest
           </span>
         </div>
         <div className="mt-1 text-right text-xs text-slate-500">Personal best: {best ? fmt(best.score) : "—"}</div>
-        <p className="mt-3 text-center text-[11px] text-slate-500">The team's learning on this level is saved, so you can keep training later.</p>
+        <p className="mt-3 text-center text-[11px] text-slate-500">Your teammates' learning on this level is saved, so you can keep playing later.</p>
         <div className="mt-5 grid grid-cols-3 gap-2">
           <Button onClick={onPlayAgain} autoFocus>
             <RotateCcw className="mr-1.5 h-4 w-4" />

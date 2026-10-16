@@ -24,6 +24,7 @@ let due = 0;
 let last = 0;
 let lastStats = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
+let reviewPosted = -1;
 
 const ticksPerSecond = () => BASE_TICKS_PER_SECOND * speed;
 
@@ -32,7 +33,7 @@ function view(w: World): WorldView {
     tick: w.tick,
     episode: w.episode,
     timeLimit: w.level.def.timeLimit,
-    doorsOpen: w.doorsOpen,
+    doorOpen: w.level.doors.map((d) => w.doorOpenAt(d)),
     bridged: w.bridged.slice(),
     rubble: w.rubble.slice(),
     blocks: w.blocks.slice(),
@@ -41,6 +42,11 @@ function view(w: World): WorldView {
     delivered: w.delivered,
     lasersOn: w.lasersOn.slice(),
     platePressed: w.platePressed.slice(),
+    human: w.human ?? -1,
+    humanAction: (() => {
+      const option = w.humanActionHere();
+      return option >= 0 && w.human !== null ? w.robots[w.human].options[option].label : null;
+    })(),
     robots: w.robots.map((r) => {
       const opt = r.option >= 0 ? r.options[r.option] : null;
       return {
@@ -81,17 +87,23 @@ function tick() {
   if (running) {
     due = Math.min(due + elapsed * ticksPerSecond(), ticksPerSecond());
     const start = performance.now();
-    while (due >= 1 && performance.now() - start < STEP_BUDGET_MS) {
+    while (due >= 1 && !world.pendingReview && performance.now() - start < STEP_BUDGET_MS) {
       world.step();
       due -= 1;
       stepped++;
     }
+    if (world.pendingReview) due = 0;
   }
   if (stepped > 0 || dirty) {
     const events = world.events.slice(-MAX_EVENTS);
     world.events = [];
     scope.postMessage({ type: "snapshot", view: view(world), events, tickInterval: 1 / ticksPerSecond() });
     dirty = false;
+  }
+  if (world.pendingReview && reviewPosted !== world.pendingReview.card.episode) {
+    reviewPosted = world.pendingReview.card.episode;
+    postStats(world);
+    scope.postMessage({ type: "review", review: world.pendingReview });
   }
   if ((running || dirty) && now - lastStats > STATS_INTERVAL_MS) {
     lastStats = now;
@@ -102,8 +114,15 @@ function tick() {
 scope.onmessage = ({ data: msg }) => {
   switch (msg.type) {
     case "init":
-      world = new World(getLevel(msg.levelId), { seed: msg.seed, brain: msg.brain, wasMastered: msg.wasMastered });
+      world = new World(getLevel(msg.levelId), {
+        seed: msg.seed,
+        brain: msg.brain,
+        wasMastered: msg.wasMastered,
+        human: msg.human,
+        requireReview: true,
+      });
       running = true;
+      reviewPosted = -1;
       dirty = true;
       due = 0;
       lastStats = 0;
@@ -128,6 +147,22 @@ scope.onmessage = ({ data: msg }) => {
     case "vote":
       world?.vote(msg.episode, msg.value);
       if (world) postStats(world);
+      break;
+    case "review":
+      world?.review(msg.team, msg.ratings);
+      due = 0;
+      dirty = true;
+      if (world) postStats(world);
+      break;
+    case "move":
+      world?.humanMove(msg.dir, msg.tap);
+      break;
+    case "act":
+      world?.humanAct();
+      break;
+    case "goto":
+      world?.humanGoto(msg.tile);
+      dirty = true;
       break;
     case "resetLearning":
       world?.resetLearning();

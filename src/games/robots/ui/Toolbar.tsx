@@ -2,7 +2,7 @@ import { LogOut, PanelRight, Pause, Play, RotateCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-export const SPEEDS = [1, 5, 50] as const;
+export const SPEEDS = [0.5, 1, 2] as const;
 
 interface ToolbarProps {
   speed: number;
@@ -39,7 +39,7 @@ export function Toolbar({ speed, onSpeed, paused, onTogglePause, onResetLearning
   return (
     <div className="absolute bottom-3 left-1/2 z-10 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-0.5 overflow-x-auto rounded-xl border border-white/10 bg-slate-950/80 p-1.5 shadow-lg backdrop-blur-md md:bottom-5">
       {SPEEDS.map((s, i) => (
-        <ToolButton key={s} label={`Speed ×${s}${s === 50 ? " (training mode)" : ""} (${i + 1})`} active={speed === s} onClick={() => onSpeed(s)} className="font-mono">
+        <ToolButton key={s} label={`Speed ×${s} (${i + 1})`} active={speed === s} onClick={() => onSpeed(s)} className="font-mono">
           ×{s}
         </ToolButton>
       ))}
